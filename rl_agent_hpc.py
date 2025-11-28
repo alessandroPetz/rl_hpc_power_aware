@@ -111,7 +111,11 @@ class HPCBatteryEnv(gym.Env):
             plt.tight_layout()
             filename = f"plots/battery_plot_ep{self.episode_idx}.png"
             plt.savefig(filename)
-            plt.close()   
+            plt.close()
+
+            print(f"[Episode {self.episode_idx}] total cost = {sum(self.cost_history) / 10000 :.4f}")
+
+
 
 
         self.episode_idx += 1
@@ -205,18 +209,18 @@ class HPCBatteryEnv(gym.Env):
         # 1) Reward base: costo negativo
         reward -= cost
 
-        # # 2) Penalità per caricare quando il prezzo è alto
-        # if a > 0:   # sta caricando
-        #     reward -= price_base * E_charge * 0.5
+        # 2) Penalità per caricare quando il prezzo è alto
+        if a > 0:   # sta caricando
+            reward -= price_base * E_charge * 0.5
 
-        # # 3) Bonus per scaricare quando il prezzo è alto (arbitraggio)
-        # price_mean = self.df["price_base"].mean()
-        # if a < 0:   # sta scaricando
-        #     reward += max(price_base - price_mean, 0) * E_discharge * 2.0
+        # 3) Bonus per scaricare quando il prezzo è alto (arbitraggio)
+        price_mean = self.df["price_base"].mean()
+        if a < 0:   # sta scaricando
+            reward += max(price_base - price_mean, 0) * E_discharge * 2.0
 
-        # # 4) Bonus finale per batteria piena
-        # if self.t == self.N - 1:   # episodio finito
-        #     reward += (self.battery / self.capacity) * 50.0
+        # 4) Bonus finale per batteria piena
+        if self.t == self.N - 1:   # episodio finito
+            reward += (self.battery / self.capacity) * 50.0
         
         # # 4) costo totale a fine episodio
         # if self.t == self.N - 1:   # episodio finito
@@ -238,26 +242,6 @@ class HPCBatteryEnv(gym.Env):
         return self._get_obs(), reward, terminated, False, {}                  
 
 
-# -------------------------------------------------------
-# CALLBACK PER COSTO EPISODIO
-# -------------------------------------------------------
-class EpisodeCostCallback(BaseCallback):
-    def __init__(self, verbose=1):
-        super().__init__(verbose)
-        self.episode_cost = 0
-        self.episode_idx = 1
-
-    def _on_step(self):
-        reward = self.locals["rewards"][0]
-        self.episode_cost += -reward 
-
-        done = self.locals["dones"][0]
-        if done:
-            self.episode_cost = self.episode_cost / 10000  # nomralizzo
-            print(f"[Episode {self.episode_idx}] total cost = {self.episode_cost:.4f}")
-            self.episode_idx += 1
-            self.episode_cost = 0
-        return True
 
 def dynamic_low_price(timestamp):
     hour = timestamp.hour
@@ -283,7 +267,6 @@ if __name__ == "__main__":
 
 
     env = HPCBatteryEnv(df)
-    callback = EpisodeCostCallback()
 
     policy_kwargs = dict(
         net_arch=[256, 256, 128],
@@ -295,7 +278,9 @@ if __name__ == "__main__":
         env,
         policy_kwargs=policy_kwargs,
         learning_rate=3e-4,
-        n_steps=4096,          # raccolgo questa quantità di step prima di fare un update
+        #n_steps=65536,          # raccolgo questa quantità di step prima di fare un update
+        n_steps=4096,
+        #batch_size=1024,
         batch_size=64,
         ent_coef=0.01,
         gae_lambda=0.95,
@@ -303,6 +288,7 @@ if __name__ == "__main__":
         verbose=0,
         device="cpu"
     )
-    model.learn(total_timesteps=1_000_000, callback=callback)
+    model.learn(total_timesteps=1_000_000)
+
 
     model.save("ppo_battery_hpc")
