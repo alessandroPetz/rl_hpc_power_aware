@@ -53,10 +53,14 @@ class HPCBatteryEnv(gym.Env):
         # a < 0 → scarica
         # a > 0 → carica
         # -------------------------------
-        self.action_space = spaces.Box(
-            low=np.array([-1.], dtype=np.float32),
-            high=np.array([1.], dtype=np.float32)
-        )
+        # # action discreta
+        # self.action_space = spaces.Box(
+        #     low=np.array([-1.], dtype=np.float32),
+        #     high=np.array([1.], dtype=np.float32)
+        # )
+        # action discreta
+        self.action_levels = np.array([-1.0, -0.5, -0.2, 0.0, 0.2, 0.5, 1.0], dtype=np.float32)
+        self.action_space = spaces.Discrete(len(self.action_levels))
  
 
         self.reset()
@@ -124,8 +128,10 @@ class HPCBatteryEnv(gym.Env):
         if self.t >= self.N - 1:
             return self._get_obs(), 0.0, True, False, {}
         
-        
-        a = float(action[0])   # a > 0 → carica, a < 0 → scarica
+        # # action continua
+        # a = float(action[0])   # a > 0 → carica, a < 0 → scarica
+        # action discreta
+        a = float(self.action_levels[action])
 
         t = self.t
         P = float(self.df.loc[t, "power"])
