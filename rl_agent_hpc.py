@@ -5,6 +5,8 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 import torch as th
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 
 class HPCBatteryEnv(gym.Env):
@@ -22,6 +24,7 @@ class HPCBatteryEnv(gym.Env):
         super().__init__()
 
         ## LOG ##
+        self.episode_idx = -1
         self.battery_history = []
         self.time_history = []
         self.cost_history = []
@@ -89,13 +92,27 @@ class HPCBatteryEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
-        ## LOG ##
+        ## START PLOT LOG ##
         #print(self.battery_history)
         #print(self.cost_history)
+        if self.episode_idx > 0:
+            plt.figure(figsize=(14, 5))
+            plt.plot(mdates.date2num(self.time_history), self.battery_history)
+            plt.xlabel("Time")
+            plt.ylabel("Battery Charge (Wh)")
+            plt.title("Battery State of Charge Over Time")
+            plt.grid(True)
+            plt.tight_layout()
+            filename = f"plots/battery_plot_ep{self.episode_idx}.png"
+            plt.savefig(filename)
+            plt.close()   
+
+
+        self.episode_idx += 1
         self.battery_history = [self.capacity]
-        self.time_history = [0]
+        self.time_history =  [self.df.loc[0, "time"]]
         self.cost_history = [0]
-        ## LOG ##
+        ## END START PLOT LOG ##
 
         self.t = 0
         self.battery = self.capacity  # inizialmente piena
@@ -202,7 +219,7 @@ class HPCBatteryEnv(gym.Env):
         ## LOG ##
         self.battery_history.append(self.battery)
         self.cost_history.append(cost)
-        self.time_history.append(self.t)
+        self.time_history.append(self.df.loc[t, "time"])
         ## LOG ##
 
 
@@ -216,7 +233,7 @@ class EpisodeCostCallback(BaseCallback):
     def __init__(self, verbose=1):
         super().__init__(verbose)
         self.episode_cost = 0
-        self.episode_idx = 0
+        self.episode_idx = 1
 
     def _on_step(self):
         reward = self.locals["rewards"][0]
@@ -229,8 +246,6 @@ class EpisodeCostCallback(BaseCallback):
             self.episode_idx += 1
             self.episode_cost = 0
         return True
-    
-
 
 def dynamic_low_price(timestamp):
     hour = timestamp.hour
@@ -279,4 +294,3 @@ if __name__ == "__main__":
     model.learn(total_timesteps=1_000_000, callback=callback)
 
     model.save("ppo_battery_hpc")
-
