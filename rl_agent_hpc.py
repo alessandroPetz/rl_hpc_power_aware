@@ -60,6 +60,7 @@ class HPCBatteryEnv(gym.Env):
         # )
         # action discreta
         self.action_levels = np.array([-1.0, -0.5, -0.2, 0.0, 0.2, 0.5, 1.0], dtype=np.float32)
+        self.action_levels = np.array([-1.0, 0.0, 1.0], dtype=np.float32)
         self.action_space = spaces.Discrete(len(self.action_levels))
  
 
@@ -125,8 +126,8 @@ class HPCBatteryEnv(gym.Env):
 
     def step(self, action):
 
-        if self.t >= self.N - 1:
-            return self._get_obs(), 0.0, True, False, {}
+        # if self.t >= self.N - 1:
+        #     return self._get_obs(), 0.0, True, False, {}
         
         # # action continua
         # a = float(action[0])   # a > 0 → carica, a < 0 → scarica
@@ -145,7 +146,7 @@ class HPCBatteryEnv(gym.Env):
         # -----------------------------------
         # 1. ENERGIA AZIONE (libera)
         # -----------------------------------
-        # NB se fisso a = 0, la simulazione diventa diventa come quella deterministica senza batteria.
+        # NB se fisso a = 0, la simulazione diventa come quella deterministica senza batteria.
         # a=0
         if a > 0:
             # CARICA
@@ -202,7 +203,7 @@ class HPCBatteryEnv(gym.Env):
         reward = 0.0
 
         # 1) Reward base: costo negativo
-        reward -= cost * 1000
+        reward -= cost
 
         # # 2) Penalità per caricare quando il prezzo è alto
         # if a > 0:   # sta caricando
@@ -216,12 +217,16 @@ class HPCBatteryEnv(gym.Env):
         # # 4) Bonus finale per batteria piena
         # if self.t == self.N - 1:   # episodio finito
         #     reward += (self.battery / self.capacity) * 50.0
+        
+        # # 4) costo totale a fine episodio
+        # if self.t == self.N - 1:   # episodio finito
+        #     reward -= sum(self.cost_history) * 1000
 
         # -----------------------------------
         # 7. TEMPO
-        # -----------------------------------
+        # -----------------------------------s<
         self.t += 1
-        terminated = self.t >= self.N - 1
+        terminated = self.t > self.N - 1
 
         ## LOG ##
         self.battery_history.append(self.battery)
