@@ -57,6 +57,7 @@ class HPCBatteryEnv(gym.Env):
             low=np.array([-1.], dtype=np.float32),
             high=np.array([1.], dtype=np.float32)
         )
+ 
 
         self.reset()
 
@@ -123,7 +124,7 @@ class HPCBatteryEnv(gym.Env):
         if self.t >= self.N - 1:
             return self._get_obs(), 0.0, True, False, {}
         
-    
+        
         a = float(action[0])   # a > 0 → carica, a < 0 → scarica
 
         t = self.t
@@ -274,7 +275,7 @@ if __name__ == "__main__":
     callback = EpisodeCostCallback()
 
     policy_kwargs = dict(
-        net_arch=[256, 256],
+        net_arch=[256, 256, 128],
         activation_fn=th.nn.ReLU
     )
 
@@ -283,9 +284,9 @@ if __name__ == "__main__":
         env,
         policy_kwargs=policy_kwargs,
         learning_rate=3e-4,
-        n_steps=2048,          # raccolgo questa quantità di step prima di fare un update
+        n_steps=4096,          # raccolgo questa quantità di step prima di fare un update
         batch_size=64,
-        ent_coef=0.0,
+        ent_coef=0.01,
         gae_lambda=0.95,
         clip_range=0.2,
         verbose=0,
