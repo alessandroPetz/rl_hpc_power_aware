@@ -14,9 +14,9 @@ class HPCBatteryEnv(gym.Env):
         self, 
         df, 
         threshold=400000,
-        battery_capacity=0.0000000000001,
-        max_charge_rate=0.0000000000001,      # Wh/h
-        max_discharge_rate=0.0000000001
+        battery_capacity=400000,
+        max_charge_rate=400000,      # Wh/h
+        max_discharge_rate=400000
 
     ):
         super().__init__()
@@ -38,7 +38,7 @@ class HPCBatteryEnv(gym.Env):
         self.max_discharge_rate = max_discharge_rate
 
         # -------------------------------
-        # Observation: [P_ratio, P_peak, battery_norm, time_norm]
+        # Observation: [P_ratio, P_peak, battery_norm, time_norm, price_base_norm]
         # -------------------------------
         self.observation_space = spaces.Box(
             low=np.array([0., 0., 0., 0., 0.], dtype=np.float32),
@@ -68,8 +68,8 @@ class HPCBatteryEnv(gym.Env):
         time_norm = t / (self.N - 1)
 
         # prezzi normalizzati
-        price_low = float(self.df.loc[t, "price_low"])
-        price_low_norm = price_low / self.df["price_low"].max()
+        price_base = float(self.df.loc[t, "price_base"])
+        price_base_norm = price_base / self.df["price_base"].max()
 
         # print(np.array([
         #     P_ratio,
@@ -83,7 +83,7 @@ class HPCBatteryEnv(gym.Env):
             P_peak,
             battery_norm,
             time_norm,
-            price_low_norm
+            price_base_norm
         ], dtype=np.float32)
 
     def reset(self, seed=None, options=None):
@@ -121,8 +121,8 @@ class HPCBatteryEnv(gym.Env):
         # -----------------------------------
         # 1. ENERGIA AZIONE (libera)
         # -----------------------------------
-        # TODO anche se fisso a = 0, l'agente spende di più della sim base, perchè?
-        a=0
+        # NB se fisso a = 0, la simulazione diventa diventa come quella deterministica senza batteria.
+        # a=0
         if a > 0:
             # CARICA
             E_charge_req = a * self.max_charge_rate * dt
@@ -158,10 +158,10 @@ class HPCBatteryEnv(gym.Env):
         # -----------------------------------
         # 4. COSTO (modello generale)
         # -----------------------------------
-        price_low  = self.df.loc[t, "price_low"]
+        price_base  = self.df.loc[t, "price_base"]
         price_high = self.df.loc[t, "price_high"]
 
-        cost = (E_base * price_low) + (E_peak * price_high)
+        cost = (E_base * price_base) + (E_peak * price_high)
 
         # -----------------------------------
         # 5. AGGIORNA BATTERIA
@@ -178,20 +178,20 @@ class HPCBatteryEnv(gym.Env):
         reward = 0.0
 
         # 1) Reward base: costo negativo
-        reward -= cost
+        reward -= cost * 1000
 
-        # 2) Penalità per caricare quando il prezzo è alto
-        if a > 0:   # sta caricando
-            reward -= price_low * E_charge * 0.5
+        # # 2) Penalità per caricare quando il prezzo è alto
+        # if a > 0:   # sta caricando
+        #     reward -= price_base * E_charge * 0.5
 
-        # 3) Bonus per scaricare quando il prezzo è alto (arbitraggio)
-        price_mean = self.df["price_low"].mean()
-        if a < 0:   # sta scaricando
-            reward += max(price_low - price_mean, 0) * E_discharge * 2.0
+        # # 3) Bonus per scaricare quando il prezzo è alto (arbitraggio)
+        # price_mean = self.df["price_base"].mean()
+        # if a < 0:   # sta scaricando
+        #     reward += max(price_base - price_mean, 0) * E_discharge * 2.0
 
-        # 4) Bonus finale per batteria piena
-        if self.t == self.N - 1:   # episodio finito
-            reward += (self.battery / self.capacity) * 50.0
+        # # 4) Bonus finale per batteria piena
+        # if self.t == self.N - 1:   # episodio finito
+        #     reward += (self.battery / self.capacity) * 50.0
 
         # -----------------------------------
         # 7. TEMPO
@@ -224,6 +224,7 @@ class EpisodeCostCallback(BaseCallback):
 
         done = self.locals["dones"][0]
         if done:
+            self.episode_cost = self.episode_cost / 10000  # nomralizzo
             print(f"[Episode {self.episode_idx}] total cost = {self.episode_cost:.4f}")
             self.episode_idx += 1
             self.episode_cost = 0
@@ -232,13 +233,13 @@ class EpisodeCostCallback(BaseCallback):
 
 
 def dynamic_low_price(timestamp):
-    h = timestamp.hour
-    if 0 <= h < 6:
-        return 0.00005
-    elif 6 <= h < 22:
-        return 0.00015
+    hour = timestamp.hour
+    if 0 <= hour < 6:
+        return 5
+    elif 6 <= hour < 22:
+        return 12
     else:
-        return 0.00008
+        return 7
         
 if __name__ == "__main__":
     # -------------------------------------------------------
@@ -250,8 +251,8 @@ if __name__ == "__main__":
     df["dt_hours"] = df["time"].diff().dt.total_seconds() / 3600
     df["dt_hours"] = df["dt_hours"].fillna(0)
     
-    df["price_low"] = df["time"].apply(dynamic_low_price)
-    df["price_high"] = df["price_low"] * 3  
+    df["price_base"] = df["time"].apply(dynamic_low_price)
+    df["price_high"] = df["price_base"] * 3  
 
 
     env = HPCBatteryEnv(df)
@@ -278,3 +279,4 @@ if __name__ == "__main__":
     model.learn(total_timesteps=1_000_000, callback=callback)
 
     model.save("ppo_battery_hpc")
+
