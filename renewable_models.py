@@ -86,3 +86,74 @@ class RenewableModels:
         P_solar = np.maximum(0, solar_raw * cloud_factor)
 
         return P_solar
+    
+    def solar_cloudy2(
+        self,
+        df,
+        p_max=200_000,
+        clear_day_prob=0.30,      # 30% giorni limpidi
+        cloudy_day_prob=0.15,     # 15% giorni pessimi
+        variability=0.15,         # variazione intra-giorno
+        cloud_min=0.4,            # notte esclusa
+        cloud_max=1.3
+    ):
+        """
+        Modello solare più realistico:
+        - maggioranza giorni 'normali'
+        - 30% limpidi (alta produzione)
+        - 15% molto nuvolosi (bassa produzione)
+        - variazione intra-giornaliera leggera
+        - nessun drift verso valori costantemente bassi
+        """
+
+        N = len(df)
+        hours = df["time"].dt.hour + df["time"].dt.minute/60
+
+        # ---------------------------------------------------------
+        # 1) Forma base del sole
+        # ---------------------------------------------------------
+        solar_raw = np.maximum(0, p_max * np.sin(2 * np.pi * hours / 24))
+
+        # ---------------------------------------------------------
+        # 2) Classificazione giornaliera (limpido / normale / nuvoloso)
+        # ---------------------------------------------------------
+        df["date_only"] = df["time"].dt.date
+        unique_days = df["date_only"].unique()
+        day_factor = {}
+
+        for d in unique_days:
+            r = self.rng.random()
+
+            if r < clear_day_prob:
+                # giorno molto limpido → tanta produzione
+                day_factor[d] = self.rng.uniform(1.0, 1.3)
+
+            elif r < clear_day_prob + cloudy_day_prob:
+                # giorno molto nuvoloso
+                day_factor[d] = self.rng.uniform(0.2, 0.5)
+
+            else:
+                # giorno normale
+                day_factor[d] = self.rng.uniform(0.7, 1.0)
+
+        day_mult = np.array([day_factor[d] for d in df["date_only"]])
+
+        # ---------------------------------------------------------
+        # 3) Variazione intra-giornaliera smooth
+        # ---------------------------------------------------------
+        base_cloud = self.rng.normal(1.0, variability, size=N)
+
+        # smoothed using moving window (evita oscillazioni assurde)
+        window = 20  # dipende dal passo temporale; 20 ≈ ~6–10 minuti
+        kernel = np.ones(window) / window
+        smooth_cloud = np.convolve(base_cloud, kernel, mode="same")
+
+        smooth_cloud = np.clip(smooth_cloud, cloud_min, cloud_max)
+
+        # ---------------------------------------------------------
+        # 4) Produzione finale
+        # ---------------------------------------------------------
+        P_solar = solar_raw * day_mult * smooth_cloud
+
+        return P_solar
+

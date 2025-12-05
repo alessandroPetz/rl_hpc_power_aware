@@ -69,6 +69,8 @@ class HPCBatteryEnv(gym.Env):
         #     low=np.array([-1.], dtype=np.float32),
         #     high=np.array([1.], dtype=np.float32)
         # )
+
+        # TODO CAPIRE BENE COME FUNZIONA LACTION E MIGLIORARE!
         # action discreta
         self.action_levels = np.array([-1.0, -0.5, -0.2, 0.0, 0.2, 0.5, 1.0], dtype=np.float32)
         #self.action_levels = np.array([-1.0, 0.0, 1.0], dtype=np.float32)
@@ -286,7 +288,7 @@ if __name__ == "__main__":
     # -------------------------------------------------------
     # RUN TRAINING
     # -------------------------------------------------------
-    df = pd.read_csv("cluster_power_only_nodes_10days.csv")[8641:]
+    df = pd.read_csv("cluster_power_only_nodes_10days.csv")#[8641:]
     # df = pd.read_csv("cluster_power_only_nodes.csv")
 
     df["time"] = pd.to_datetime(df["time"])
@@ -299,7 +301,7 @@ if __name__ == "__main__":
     rm = RenewableModels(seed=42)
 
     df["P_solar"] = rm.solar_cloudy(df) 
-    df["P_wind"]  = rm.wind_stochastic_daily(df)
+    df["P_wind"]  = rm.wind_stochastic(df)
     df["P_ren"]   = df["P_solar"] + df["P_wind"]
 
     # previsioni del tempo
