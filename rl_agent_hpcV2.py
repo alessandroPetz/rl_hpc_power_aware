@@ -299,7 +299,15 @@ def dynamic_low_price(timestamp):
         return 0.0012
     else:
         return 0.0005
-        
+
+
+# TODO complicare, aggiungrere variabiuli
+# ora l agente funziona. fa meglio della simulazione ma di poco.
+# capisce che la batteria va usata di giorno e caricata di notte.. o almeno sembra
+# aggiungendo altre variabili può fare ancora meglio.
+#  
+
+
 if __name__ == "__main__":
     # -------------------------------------------------------
     # RUN TRAINING
@@ -349,6 +357,8 @@ if __name__ == "__main__":
         activation_fn=th.nn.ReLU
     )
 
+    # questa rete sembra fuznionare, più lenta ma fa meglio..
+    
     # model = PPO(
     #     "MlpPolicy",
     #     vec_env,
