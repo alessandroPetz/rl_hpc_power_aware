@@ -52,7 +52,8 @@ class HPCBatteryEnv(gym.Env):
         self.prev_action = 0
 
         # -------------------------------
-        # Observation: [P_ratio, P_peak, battery_norm, time_left, price_base_norm, hour_sin, hour_cos, prev_a, P_ren_norm, forecast_ren_norm1h, forecast_ren_norm6h]
+        # Observation: [P_ratio, P_peak, battery_norm, time_left, price_base_norm, 
+        # hour_sin, hour_cos, prev_a, P_ren_norm, forecast_ren_norm1h, forecast_ren_norm6h]
         # -------------------------------
         self.observation_space = spaces.Box(
             low=np.array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.], dtype=np.float32),
@@ -144,134 +145,260 @@ class HPCBatteryEnv(gym.Env):
         self.battery = self.capacity / 2  # inizialmente piena
         return self._get_obs(), {}
 
+    # def step(self, action):
+
+    #     # if self.t >= self.N - 1:
+    #     #     return self._get_obs(), 0.0, True, False, {}
+        
+    #     # # action continua
+    #     # a = float(action[0])   # a > 0 → carica, a < 0 → scarica
+    #     # action discreta
+    #     a = float(self.action_levels[action])
+    #     self.prev_action = a 
+
+    #     t = self.t
+    #     P_load = float(self.df.loc[t, "power"])     # carico HPC
+    #     P_ren  = float(self.df.loc[t, "P_ren"])     # rinnovabile
+
+    #     dt = float(self.df.loc[t, "dt_hours"])
+
+    #     if dt == 0:
+    #         self.t += 1
+    #         terminated = self.t > self.N - 1
+    #         return self._get_obs(), 0.0, terminated, False, {}
+
+    #     # -----------------------------------
+    #     # 1. ENERGIA AZIONE (libera)
+    #     # -----------------------------------
+        
+    #     # ------START MANIPULATING ACTION ----
+    #     # ------------------------------------
+
+    #     # 1) come in simulazione senza batteria
+    #     # a=0
+    #     #
+    #     # 2) come in simulaizone con batteria, 
+    #     # la differenza è che qui carico o scarico sempre al massimo, in simulazione sono limitato dal threshold
+    #     #
+    #     # if P <= self.threshold :
+    #     #     # carico la batteria
+    #     #     a = 1
+        
+    #     # else:
+    #     #     # uso  la batteria
+    #     #     a = -1
+    #     #
+    #     #
+    #     # 3) innesto manualmente regola per comportarmi più similmente alla sim deterministica con batteria
+    #     # se sono sotto threshold non posso usare la batteria
+    #     # se sono sopra threshold non posso caricarla.
+    #     # difff con 2) qui posso avere a in percentuale
+    #     # 
+    #     # if P <= self.threshold :
+    #     #     a = max (a,0)
+    #     # else:
+    #     #     a = min (a,0)
+        
+    #     # 3) forzare PRIORITÀ ALLA RINNOVABILE
+    #     # if P_ren > P_load and self.battery < self.capacity:
+    #     #     a = max(a, 0)   # forzo carica
+
+
+    #     # ----------------------------------- 
+    #     # ----- END MANIPULATING ACTION -----
+
+
+    # # azione -> energia richiesta (Wh) per questo step
+    #     if a > 0:
+    #         # richiesta energia per caricare (da SURPLUS solo)
+    #         P_charge_req = a * self.max_charge_rate   # W
+    #         # massimo power che può provenire da surplus rinnovabile:
+    #         P_surplus_available = max(P_ren - P_load, 0.0)
+    #         # limita la potenza di carica al surplus (policy A)
+    #         P_charge_eff = min(P_charge_req, P_surplus_available)
+    #         E_charge = P_charge_eff * dt
+    #         E_discharge = 0.0
+    #     else:
+    #         # scarico
+    #         P_discharge_req = -a * self.max_discharge_rate
+    #         # energia disponibile dalla batteria (Wh)
+    #         E_discharge_req = P_discharge_req * dt
+    #         E_discharge = min(E_discharge_req, self.battery)
+    #         E_charge = 0.0
+
+    #     # Potenze corrispondenti
+    #     P_charge = E_charge / dt
+    #     P_discharge = E_discharge / dt
+
+    #     # Potenza vista dalla rete (prima: load - ren)
+    #     P_net = P_load - P_ren
+    #     # effetto batteria: carica aumenta richiesta, scarica riduce richiesta
+    #     P_grid = P_net + P_charge - P_discharge
+    #     P_grid = max(P_grid, 0.0)
+
+    #     # energy from grid this step
+    #     E_grid = P_grid * dt
+
+    #     # split base/peak on grid import
+    #     E_base = min(P_grid, self.threshold) * dt
+    #     E_peak = max(P_grid - self.threshold, 0) * dt
+
+    #     price_base = float(self.df.loc[t, "price_base"])
+    #     price_high = float(self.df.loc[t, "price_high"])
+    #     cost = E_base * price_base + E_peak * price_high
+
+    #     # update battery
+    #     self.battery += E_charge
+    #     self.battery -= E_discharge
+    #     self.battery = float(np.clip(self.battery, 0.0, self.capacity))
+
+    #     # curtailment (energia rinnovabile sprecata)
+    #     P_surplus_after_charge = max(P_ren - P_load - P_charge, 0.0)
+    #     E_curtail = P_surplus_after_charge * dt
+
+    #     # reward: vogliamo MAXIMIZE -> reward = -cost + shaping
+    #     reward = -cost
+    #     # shaping: penalizza fortemente spreco; incentiva uso rinnovabile
+    #     reward -= 5.0 * E_curtail
+    #     E_ren_used = min(P_load, P_ren) * dt + E_charge
+    #     reward += 2.0 * E_ren_used
+
+    #     # aggiorna log
+    #     self.battery_history.append(self.battery)
+    #     self.cost_history.append(cost)
+    #     self.curtailment_history.append(E_curtail)
+    #     self.time_history.append(self.df.loc[t, "time"])
+
+    #     self.t += 1
+    #     terminated = self.t > self.N - 1
+
+    #     return self._get_obs(), float(reward), terminated, False, {}                 
+
+
     def step(self, action):
 
-        # if self.t >= self.N - 1:
-        #     return self._get_obs(), 0.0, True, False, {}
-        
-        # # action continua
-        # a = float(action[0])   # a > 0 → carica, a < 0 → scarica
-        # action discreta
+        # --- ACTION ---
+        # a in [-1,1], a<0 scarica; a=0 neutro; a>0 carica da rete
         a = float(self.action_levels[action])
-        self.prev_action = a 
+        self.prev_action = a
 
         t = self.t
-        P_load = float(self.df.loc[t, "power"])     # carico HPC
-        P_ren  = float(self.df.loc[t, "P_ren"])     # rinnovabile
-
         dt = float(self.df.loc[t, "dt_hours"])
+        time = self.df.loc[t, "time"]
 
+        P_load = float(self.df.loc[t, "power"])      # W
+        P_ren  = float(self.df.loc[t, "P_ren"])      # W
+
+        price_base = float(self.df.loc[t, "price_base"])
+        price_high = float(self.df.loc[t, "price_high"])
+
+        # se dt=0: no avanzamento fisico
         if dt == 0:
             self.t += 1
             terminated = self.t > self.N - 1
             return self._get_obs(), 0.0, terminated, False, {}
 
-        # -----------------------------------
-        # 1. ENERGIA AZIONE (libera)
-        # -----------------------------------
+        # ---------------------------------------------------------
+        # 1. USA LA RINNOVABILE PER COPRIRE IL CARICO
+        # ---------------------------------------------------------
+        P_from_ren = min(P_load, P_ren)
+        P_surplus  = max(P_ren - P_from_ren, 0.0)
+
+        # ---------------------------------------------------------
+        # 1A. SE C'È SURPLUS: CARICA LA BATTERIA E FINE STEP
+        # ---------------------------------------------------------
+        if P_surplus > 0:
+            E_surplus = P_surplus * dt                     # Wh
+            max_charge_wh = self.max_charge_rate * dt      # Wh
+            room = self.capacity - self.battery            # Wh
+
+            E_charge = min(E_surplus, max_charge_wh, room)
+            self.battery += E_charge
+
+            E_curtail = E_surplus - E_charge
+
+            # reward: gratis → positivo se usi rinnovabile
+            reward = 2.0 * P_from_ren * dt - 5.0 * E_curtail
+
+            # logs
+            self.battery_history.append(self.battery)
+            self.cost_history.append(0.0)
+            self.curtailment_history.append(E_curtail)
+            self.time_history.append(time)
+
+            self.t += 1
+            terminated = self.t > self.N - 1
+            return self._get_obs(), float(reward), terminated, False, {}
+
+        # ---------------------------------------------------------
+        # 2. NON C'È SURPLUS → RESTO DA COPRIRE
+        # ---------------------------------------------------------
+        P_remaining = P_load - P_from_ren       # W
+        E_needed = P_remaining * dt             # Wh
+
+        E_curtail = 0.0
+        E_charge = 0.0
+        E_discharge = 0.0
         
-        # ------START MANIPULATING ACTION ----
-        # ------------------------------------
-
-        # 1) come in simulazione senza batteria
-        # a=0
-        #
-        # 2) come in simulaizone con batteria, 
-        # la differenza è che qui carico o scarico sempre al massimo, in simulazione sono limitato dal threshold
-        #
-        # if P <= self.threshold :
-        #     # carico la batteria
-        #     a = 1
+        #a=-1 if unconmmented = sim standard
         
-        # else:
-        #     # uso  la batteria
-        #     a = -1
-        #
-        #
-        # 3) innesto manualmente regola per comportarmi più similmente alla sim deterministica con batteria
-        # se sono sotto threshold non posso usare la batteria
-        # se sono sopra threshold non posso caricarla.
-        # difff con 2) qui posso avere a in percentuale
-        # 
-        # if P <= self.threshold :
-        #     a = max (a,0)
-        # else:
-        #     a = min (a,0)
-        
-        # 3) forzare PRIORITÀ ALLA RINNOVABILE
-        # if P_ren > P_load and self.battery < self.capacity:
-        #     a = max(a, 0)   # forzo carica
+        # ---------------------------------------------------------
+        # 2A. SE a < 0 → USA LA BATTERIA
+        # ---------------------------------------------------------
+        if a < 0:
+            max_discharge_wh = -a* self.max_discharge_rate * dt
+            E_discharge = min(E_needed, self.battery, max_discharge_wh)
+            self.battery -= E_discharge
+            E_needed -= E_discharge
 
-
-        # ----------------------------------- 
-        # ----- END MANIPULATING ACTION -----
-
-
-    # azione -> energia richiesta (Wh) per questo step
+        # ---------------------------------------------------------
+        # 2B. SE a > 0 → CARICA DA RETE
+        # ---------------------------------------------------------
         if a > 0:
-            # richiesta energia per caricare (da SURPLUS solo)
-            P_charge_req = a * self.max_charge_rate   # W
-            # massimo power che può provenire da surplus rinnovabile:
-            P_surplus_available = max(P_ren - P_load, 0.0)
-            # limita la potenza di carica al surplus (policy A)
-            P_charge_eff = min(P_charge_req, P_surplus_available)
-            E_charge = P_charge_eff * dt
-            E_discharge = 0.0
-        else:
-            # scarico
-            P_discharge_req = -a * self.max_discharge_rate
-            # energia disponibile dalla batteria (Wh)
-            E_discharge_req = P_discharge_req * dt
-            E_discharge = min(E_discharge_req, self.battery)
-            E_charge = 0.0
+            max_charge_wh = a* self.max_charge_rate * dt
+            room = self.capacity - self.battery
+            E_charge = min(max_charge_wh, room)
+            self.battery += E_charge
 
-        # Potenze corrispondenti
-        P_charge = E_charge / dt
-        P_discharge = E_discharge / dt
+            # caricare da rete aumenta la richiesta
+            E_needed += E_charge
 
-        # Potenza vista dalla rete (prima: load - ren)
-        P_net = P_load - P_ren
-        # effetto batteria: carica aumenta richiesta, scarica riduce richiesta
-        P_grid = P_net + P_charge - P_discharge
-        P_grid = max(P_grid, 0.0)
+        # ---------------------------------------------------------
+        # 3. ENERGIA FINALE DALLA RETE (Wh)
+        # ---------------------------------------------------------
+        P_grid = E_needed / dt if dt > 0 else 0
 
-        # energy from grid this step
-        E_grid = P_grid * dt
-
-        # split base/peak on grid import
         E_base = min(P_grid, self.threshold) * dt
         E_peak = max(P_grid - self.threshold, 0) * dt
 
-        price_base = float(self.df.loc[t, "price_base"])
-        price_high = float(self.df.loc[t, "price_high"])
         cost = E_base * price_base + E_peak * price_high
 
-        # update battery
-        self.battery += E_charge
-        self.battery -= E_discharge
-        self.battery = float(np.clip(self.battery, 0.0, self.capacity))
+        # ---------------------------------------------------------
+        # 4. REWARD (stesso stile del tuo)
+        # ---------------------------------------------------------
+        E_ren_used = P_from_ren * dt
 
-        # curtailment (energia rinnovabile sprecata)
-        P_surplus_after_charge = max(P_ren - P_load - P_charge, 0.0)
-        E_curtail = P_surplus_after_charge * dt
-
-        # reward: vogliamo MAXIMIZE -> reward = -cost + shaping
-        reward = -cost
-        # shaping: penalizza fortemente spreco; incentiva uso rinnovabile
-        reward -= 5.0 * E_curtail
-        E_ren_used = min(P_ren, P_load + P_charge) * dt
+        reward = 0
+        reward -= cost
         reward += 2.0 * E_ren_used
+        reward -= 5.0 * E_curtail
 
-        # aggiorna log
+        # ---------------------------------------------------------
+        # LOGS
+        # ---------------------------------------------------------
         self.battery_history.append(self.battery)
         self.cost_history.append(cost)
         self.curtailment_history.append(E_curtail)
-        self.time_history.append(self.df.loc[t, "time"])
+        self.time_history.append(time)
 
         self.t += 1
         terminated = self.t > self.N - 1
 
-        return self._get_obs(), float(reward), terminated, False, {}                 
+        # shape reward
+        if terminated:
+            reward -= sum(self.cost_history)*1000
+
+        return self._get_obs(), float(reward), terminated, False, {}
 
 
 
@@ -300,8 +427,10 @@ if __name__ == "__main__":
 
     rm = RenewableModels(seed=42)
 
-    df["P_solar"] = rm.solar_cloudy(df) 
-    df["P_wind"]  = rm.wind_stochastic(df)
+    df["P_solar"] = rm.solar_cloudy2(df)
+    #df["P_solar"] = rm.solar_simple(df)
+    df["P_wind"] = rm.wind_stochastic(df)
+    #df["P_wind"] = rm.wind_uniform(df)
     df["P_ren"]   = df["P_solar"] + df["P_wind"]
 
     # previsioni del tempo
