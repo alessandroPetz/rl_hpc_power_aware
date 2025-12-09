@@ -24,9 +24,9 @@ class HPCBatteryEnv(gym.Env):
         self, 
         df, 
         threshold=400000,
-        battery_capacity=400000,
-        max_charge_rate=400000,      # Wh/h
-        max_discharge_rate=400000
+        battery_capacity=200000,
+        max_charge_rate=200000,      # Wh/h
+        max_discharge_rate=200000
 
     ):
         super().__init__()
@@ -131,6 +131,17 @@ class HPCBatteryEnv(gym.Env):
             plt.savefig(filename)
             plt.close()
 
+            plt.figure(figsize=(14, 5))
+            plt.plot(mdates.date2num(self.time_history), self.cost_history)
+            plt.xlabel("Time")
+            plt.ylabel("Cost")
+            plt.title("Cost History")
+            plt.grid(True)
+            plt.tight_layout()
+            filename = f"plots/costs_plot_ep{self.episode_idx}.png"
+            plt.savefig(filename)
+            plt.close()
+
             print(f"[Episode {self.episode_idx}] total cost = {sum(self.cost_history) :.4f}")
 
 
@@ -144,135 +155,6 @@ class HPCBatteryEnv(gym.Env):
         self.t = 0
         self.battery = self.capacity / 2  # inizialmente piena
         return self._get_obs(), {}
-
-    # def step(self, action):
-
-    #     # if self.t >= self.N - 1:
-    #     #     return self._get_obs(), 0.0, True, False, {}
-        
-    #     # # action continua
-    #     # a = float(action[0])   # a > 0 → carica, a < 0 → scarica
-    #     # action discreta
-    #     a = float(self.action_levels[action])
-    #     self.prev_action = a 
-
-    #     t = self.t
-    #     P_load = float(self.df.loc[t, "power"])     # carico HPC
-    #     P_ren  = float(self.df.loc[t, "P_ren"])     # rinnovabile
-
-    #     dt = float(self.df.loc[t, "dt_hours"])
-
-    #     if dt == 0:
-    #         self.t += 1
-    #         terminated = self.t > self.N - 1
-    #         return self._get_obs(), 0.0, terminated, False, {}
-
-    #     # -----------------------------------
-    #     # 1. ENERGIA AZIONE (libera)
-    #     # -----------------------------------
-        
-    #     # ------START MANIPULATING ACTION ----
-    #     # ------------------------------------
-
-    #     # 1) come in simulazione senza batteria
-    #     # a=0
-    #     #
-    #     # 2) come in simulaizone con batteria, 
-    #     # la differenza è che qui carico o scarico sempre al massimo, in simulazione sono limitato dal threshold
-    #     #
-    #     # if P <= self.threshold :
-    #     #     # carico la batteria
-    #     #     a = 1
-        
-    #     # else:
-    #     #     # uso  la batteria
-    #     #     a = -1
-    #     #
-    #     #
-    #     # 3) innesto manualmente regola per comportarmi più similmente alla sim deterministica con batteria
-    #     # se sono sotto threshold non posso usare la batteria
-    #     # se sono sopra threshold non posso caricarla.
-    #     # difff con 2) qui posso avere a in percentuale
-    #     # 
-    #     # if P <= self.threshold :
-    #     #     a = max (a,0)
-    #     # else:
-    #     #     a = min (a,0)
-        
-    #     # 3) forzare PRIORITÀ ALLA RINNOVABILE
-    #     # if P_ren > P_load and self.battery < self.capacity:
-    #     #     a = max(a, 0)   # forzo carica
-
-
-    #     # ----------------------------------- 
-    #     # ----- END MANIPULATING ACTION -----
-
-
-    # # azione -> energia richiesta (Wh) per questo step
-    #     if a > 0:
-    #         # richiesta energia per caricare (da SURPLUS solo)
-    #         P_charge_req = a * self.max_charge_rate   # W
-    #         # massimo power che può provenire da surplus rinnovabile:
-    #         P_surplus_available = max(P_ren - P_load, 0.0)
-    #         # limita la potenza di carica al surplus (policy A)
-    #         P_charge_eff = min(P_charge_req, P_surplus_available)
-    #         E_charge = P_charge_eff * dt
-    #         E_discharge = 0.0
-    #     else:
-    #         # scarico
-    #         P_discharge_req = -a * self.max_discharge_rate
-    #         # energia disponibile dalla batteria (Wh)
-    #         E_discharge_req = P_discharge_req * dt
-    #         E_discharge = min(E_discharge_req, self.battery)
-    #         E_charge = 0.0
-
-    #     # Potenze corrispondenti
-    #     P_charge = E_charge / dt
-    #     P_discharge = E_discharge / dt
-
-    #     # Potenza vista dalla rete (prima: load - ren)
-    #     P_net = P_load - P_ren
-    #     # effetto batteria: carica aumenta richiesta, scarica riduce richiesta
-    #     P_grid = P_net + P_charge - P_discharge
-    #     P_grid = max(P_grid, 0.0)
-
-    #     # energy from grid this step
-    #     E_grid = P_grid * dt
-
-    #     # split base/peak on grid import
-    #     E_base = min(P_grid, self.threshold) * dt
-    #     E_peak = max(P_grid - self.threshold, 0) * dt
-
-    #     price_base = float(self.df.loc[t, "price_base"])
-    #     price_high = float(self.df.loc[t, "price_high"])
-    #     cost = E_base * price_base + E_peak * price_high
-
-    #     # update battery
-    #     self.battery += E_charge
-    #     self.battery -= E_discharge
-    #     self.battery = float(np.clip(self.battery, 0.0, self.capacity))
-
-    #     # curtailment (energia rinnovabile sprecata)
-    #     P_surplus_after_charge = max(P_ren - P_load - P_charge, 0.0)
-    #     E_curtail = P_surplus_after_charge * dt
-
-    #     # reward: vogliamo MAXIMIZE -> reward = -cost + shaping
-    #     reward = -cost
-    #     # shaping: penalizza fortemente spreco; incentiva uso rinnovabile
-    #     reward -= 5.0 * E_curtail
-    #     E_ren_used = min(P_load, P_ren) * dt + E_charge
-    #     reward += 2.0 * E_ren_used
-
-    #     # aggiorna log
-    #     self.battery_history.append(self.battery)
-    #     self.cost_history.append(cost)
-    #     self.curtailment_history.append(E_curtail)
-    #     self.time_history.append(self.df.loc[t, "time"])
-
-    #     self.t += 1
-    #     terminated = self.t > self.N - 1
-
-    #     return self._get_obs(), float(reward), terminated, False, {}                 
 
 
     def step(self, action):
@@ -318,7 +200,7 @@ class HPCBatteryEnv(gym.Env):
             E_curtail = E_surplus - E_charge
 
             # reward: gratis → positivo se usi rinnovabile
-            reward = 2.0 * P_from_ren * dt - 5.0 * E_curtail
+            reward = 0
 
             # logs
             self.battery_history.append(self.battery)
@@ -380,8 +262,13 @@ class HPCBatteryEnv(gym.Env):
 
         reward = 0
         reward -= cost
-        reward += 2.0 * E_ren_used
-        reward -= 5.0 * E_curtail
+        reward -= 4.0 * (E_peak )
+        if a > 0:
+            reward -= (price_base * E_charge)
+        if a < 0:
+            reward += (price_high * E_discharge)
+
+        # meglio se la batteria è carica 
 
         # ---------------------------------------------------------
         # LOGS
@@ -396,7 +283,7 @@ class HPCBatteryEnv(gym.Env):
 
         # shape reward
         if terminated:
-            reward -= sum(self.cost_history)*1000
+            reward -= sum(self.cost_history)
 
         return self._get_obs(), float(reward), terminated, False, {}
 
@@ -460,21 +347,24 @@ if __name__ == "__main__":
         activation_fn=th.nn.ReLU
     )
 
-    model = PPO(
-        "MlpPolicy",
-        vec_env,
-        policy_kwargs=policy_kwargs,
-        learning_rate=3e-4,
-        n_steps=16384,          # raccolgo questa quantità di step prima di fare un update
-        #n_steps=4096,
-        batch_size=256,
-        #batch_size=64,
-        ent_coef=0.03,    # aumentare per esplorare di più (se si blocca in locale minimo)
-        gae_lambda=0.95,
-        clip_range=0.2,
-        verbose=0,
-        device="cpu"
-    )
+    # model = PPO(
+    #     "MlpPolicy",
+    #     vec_env,
+    #     policy_kwargs=policy_kwargs,
+    #     learning_rate=3e-4,
+    #     n_steps=16384,          # raccolgo questa quantità di step prima di fare un update
+    #     #n_steps=4096,
+    #     batch_size=256,
+    #     #batch_size=64,
+    #     ent_coef=0.1,    # aumentare per esplorare di più (se si blocca in locale minimo)
+    #     gae_lambda=0.95,
+    #     clip_range=0.2,
+    #     verbose=0,
+    #     device="cpu"
+    # )
+    model = PPO("MlpPolicy", vec_env,verbose=0,device="cpu")
+
+    #model.learn(total_timesteps=250_000)
     model.learn(total_timesteps=10_000_000)
 
     # Save final model trained
