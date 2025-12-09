@@ -65,17 +65,14 @@ class HPCBatteryEnv(gym.Env):
         # a < 0 → scarica
         # a > 0 → carica
         # -------------------------------
-        # # action discreta
-        # self.action_space = spaces.Box(
-        #     low=np.array([-1.], dtype=np.float32),
-        #     high=np.array([1.], dtype=np.float32)
-        # )
+        
 
-        # TODO CAPIRE BENE COME FUNZIONA LACTION E MIGLIORARE!
-        # action discreta
-        self.action_levels = np.array([-1.0, -0.5, -0.2, 0.0, 0.2, 0.5, 1.0], dtype=np.float32)
-        #self.action_levels = np.array([-1.0, 0.0, 1.0], dtype=np.float32)
-        self.action_space = spaces.Discrete(len(self.action_levels))
+        # ACTION DISCRETA
+        # self.action_levels = np.array([-1.0, -0.5, -0.2, 0.0, 0.2, 0.5, 1.0], dtype=np.float32)
+        # self.action_space = spaces.Discrete(len(self.action_levels))
+        
+        # ACTION CONTINUA
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
  
 
         self.reset()
@@ -161,7 +158,11 @@ class HPCBatteryEnv(gym.Env):
 
         # --- ACTION ---
         # a in [-1,1], a<0 scarica; a=0 neutro; a>0 carica da rete
-        a = float(self.action_levels[action])
+        # action DISCRETA
+        #  a = float(self.action_levels[action])
+        # action CONTINUA
+        a = float(action[0])
+
         self.prev_action = a
 
         t = self.t
@@ -261,14 +262,15 @@ class HPCBatteryEnv(gym.Env):
         E_ren_used = P_from_ren * dt
 
         reward = 0
+        # costo
         reward -= cost
+        # Ridurre il picco energetico
         reward -= 4.0 * (E_peak )
+        # Favorire arbitraggio prezzo (carica quando costa poco, scarica quando costa molto)
         if a > 0:
             reward -= (price_base * E_charge)
         if a < 0:
             reward += (price_high * E_discharge)
-
-        # meglio se la batteria è carica 
 
         # ---------------------------------------------------------
         # LOGS
@@ -292,11 +294,11 @@ class HPCBatteryEnv(gym.Env):
 def dynamic_low_price(timestamp):
     hour = timestamp.hour
     if 0 <= hour < 6:
-        return 0.0005
+        return 0.0002
     elif 6 <= hour < 22:
         return 0.0012
     else:
-        return 0.0007
+        return 0.0005
         
 if __name__ == "__main__":
     # -------------------------------------------------------
@@ -339,7 +341,7 @@ if __name__ == "__main__":
 
 
     vec_env = DummyVecEnv([lambda: HPCBatteryEnv(df)])
-    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_reward=10.0)
+    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_reward=10.0)    # Option Reward = False
 
 
     policy_kwargs = dict(
@@ -350,18 +352,16 @@ if __name__ == "__main__":
     # model = PPO(
     #     "MlpPolicy",
     #     vec_env,
-    #     policy_kwargs=policy_kwargs,
-    #     learning_rate=3e-4,
-    #     n_steps=16384,          # raccolgo questa quantità di step prima di fare un update
-    #     #n_steps=4096,
-    #     batch_size=256,
-    #     #batch_size=64,
-    #     ent_coef=0.1,    # aumentare per esplorare di più (se si blocca in locale minimo)
-    #     gae_lambda=0.95,
-    #     clip_range=0.2,
+    #     learning_rate=1e-4,
+    #     n_steps=4096,
+    #     batch_size=512,
+    #     gae_lambda=0.92,
+    #     ent_coef=0.01,
+    #     clip_range=0.15,
+    #     max_grad_norm=0.5,
     #     verbose=0,
     #     device="cpu"
-    # )
+    # )   
     model = PPO("MlpPolicy", vec_env,verbose=0,device="cpu")
 
     #model.learn(total_timesteps=250_000)
