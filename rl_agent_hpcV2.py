@@ -11,6 +11,7 @@ import matplotlib.dates as mdates
 import os
 
 from renewable_real import RenewableModels
+from co2 import CarbonIntensityModels
 
 MODEL_DIR = "models"
 MODEL_PATH = os.path.join(MODEL_DIR, "ppo_powercap")
@@ -27,6 +28,8 @@ class HPCBatteryEnv(gym.Env):
         battery_capacity=200000,
         max_charge_rate=200000,      # Wh/h
         max_discharge_rate=200000
+        # fattore medio (gCO2 per kWh) — scegli il valore adatto (es. 270 gCO2/kWh per ITA come esempio)
+        # CO2_G_PER_KWH_STATIC = 270.0
 
     ):
         super().__init__()
@@ -36,6 +39,7 @@ class HPCBatteryEnv(gym.Env):
         self.battery_history = []
         self.time_history = []
         self.cost_history = []
+        self.co2_history = []
         self.curtailment_history= []
         ## LOG ##
 
@@ -140,12 +144,14 @@ class HPCBatteryEnv(gym.Env):
             plt.close()
 
             print(f"[Episode {self.episode_idx}] total cost = {sum(self.cost_history) :.4f}")
+            print(f"[Episode {self.episode_idx}] CO2 totale (kg): {sum(self.co2_history)/1000:.3f}")
 
 
         self.episode_idx += 1
         self.battery_history = [self.capacity / 2]
         self.time_history =  [self.df.loc[0, "time"]]
         self.cost_history = [0]
+        self.co2_history = [0]
         self.curtailment_history= [0]
         ## END PLOT LOG ##
 
@@ -174,6 +180,8 @@ class HPCBatteryEnv(gym.Env):
 
         price_base = float(self.df.loc[t, "price_base"])
         price_high = float(self.df.loc[t, "price_high"])
+
+        CO2_G_PER_KWH = float(self.df.loc[t, "co2_intensity"])
 
         # se dt=0: no avanzamento fisico
         if dt == 0:
@@ -206,6 +214,7 @@ class HPCBatteryEnv(gym.Env):
             # logs
             self.battery_history.append(self.battery)
             self.cost_history.append(0.0)
+            self.co2_history.append(0.0)
             self.curtailment_history.append(E_curtail)
             self.time_history.append(time)
 
@@ -255,15 +264,20 @@ class HPCBatteryEnv(gym.Env):
         E_peak = max(P_grid - self.threshold, 0) * dt
 
         cost = E_base * price_base + E_peak * price_high
+        
+
+        # CALCOLO co2
+        co2_g = (E_base + E_peak) / 1000 * CO2_G_PER_KWH
+
 
         # ---------------------------------------------------------
         # 4. REWARD (stesso stile del tuo)
-        # ---------------------------------------------------------
-        E_ren_used = P_from_ren * dt
-
+        # --------------------------------------------------------
         reward = 0
         # costo
-        reward -= cost
+        # reward -= co2_g
+
+        reward -= cost 
         # Ridurre il picco energetico
         reward -= 4.0 * (E_peak )
         # Favorire arbitraggio prezzo (carica quando costa poco, scarica quando costa molto)
@@ -277,6 +291,7 @@ class HPCBatteryEnv(gym.Env):
         # ---------------------------------------------------------
         self.battery_history.append(self.battery)
         self.cost_history.append(cost)
+        self.co2_history.append(co2_g)
         self.curtailment_history.append(E_curtail)
         self.time_history.append(time)
 
@@ -286,6 +301,7 @@ class HPCBatteryEnv(gym.Env):
         # shape reward
         if terminated:
             reward -= sum(self.cost_history)
+            # reward -= sum(self.co2_history)
 
         return self._get_obs(), float(reward), terminated, False, {}
 
@@ -312,18 +328,19 @@ if __name__ == "__main__":
     # -------------------------------------------------------
     # RUN TRAINING
     # -------------------------------------------------------
-    df = pd.read_csv("cluster_power_only_nodes_10days.csv")#[8641:]
+    df = pd.read_csv("cluster_power_only_nodes_10days.csv")
     # df = pd.read_csv("cluster_power_only_nodes.csv")
 
     df["time"] = pd.to_datetime(df["time"])
     df["dt_hours"] = df["time"].diff().dt.total_seconds() / 3600
     df["dt_hours"] = df["dt_hours"].fillna(0)
     
+    # INSERISCO PREZZI
     df["price_base"] = df["time"].apply(dynamic_low_price)
     df["price_high"] = df["price_base"] * 3
 
+    # INSERISCO VALORI RINNOVABILI
     rm = RenewableModels(seed=42)
-
     #df["P_solar"] = rm.solar_cloudy2(df)
     #df["P_solar"] = rm.solar_simple(df)
     #df["P_wind"] = rm.wind_stochastic(df)
@@ -331,6 +348,10 @@ if __name__ == "__main__":
     df["P_wind"] = rm.wind_from_openmeteo(df)
     df["P_solar"] = rm.solar_from_openmeteo(df)
     df["P_ren"]   = df["P_solar"] + df["P_wind"]
+
+    # INSERISCO VALORI C02
+    cm = CarbonIntensityModels(csv_file="Co2_IT-NO_2021-2024_hourly.csv")
+    df["co2_intensity"] = cm.co2_from_csv(df)
 
     # previsioni del tempo
     steps_per_hour = int(3600 / 20)
