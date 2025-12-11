@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import os
 
-from renewable_models import RenewableModels
+from renewable_real import RenewableModels
 
 MODEL_DIR = "models"
 MODEL_PATH = os.path.join(MODEL_DIR, "ppo_powercap")
@@ -324,10 +324,12 @@ if __name__ == "__main__":
 
     rm = RenewableModels(seed=42)
 
-    df["P_solar"] = rm.solar_cloudy2(df)
+    #df["P_solar"] = rm.solar_cloudy2(df)
     #df["P_solar"] = rm.solar_simple(df)
-    df["P_wind"] = rm.wind_stochastic(df)
+    #df["P_wind"] = rm.wind_stochastic(df)
     #df["P_wind"] = rm.wind_uniform(df)
+    df["P_wind"] = rm.wind_from_openmeteo(df)
+    df["P_solar"] = rm.solar_from_openmeteo(df)
     df["P_ren"]   = df["P_solar"] + df["P_wind"]
 
     # previsioni del tempo
