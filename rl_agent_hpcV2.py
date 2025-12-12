@@ -65,6 +65,11 @@ class HPCBatteryEnv(gym.Env):
             low=np.array([0., 0., 0., 0., 0., 0., 0. ,0., 0., 0., 0., 0., 0., 0. ], dtype=np.float32),
             high=np.array([3., 3., 1., 1., 1., 1., 1. ,1., 1., 1., 1., 1., 1., 1.], dtype=np.float32)
         )
+        # senza c02 forcasting
+        # self.observation_space = spaces.Box(
+        #     low=np.array([0., 0., 0., 0., 0., 0., 0. ,0., 0., 0., 0., 0. ], dtype=np.float32),
+        #     high=np.array([3., 3., 1., 1., 1., 1., 1. ,1., 1., 1., 1., 1.], dtype=np.float32)
+        # )
 
         # -------------------------------
         # Action = singola variabile [-1, 1]
@@ -117,7 +122,7 @@ class HPCBatteryEnv(gym.Env):
         co2_forecast_1h = float(self.df.loc[t, "forecast_P_ren_1h"])  # qui è energia Wh (sum)
         co2_forecast_6h = float(self.df.loc[t, "forecast_P_ren_6h"])
 
-        # normalizzo minmax
+        # normalizzo minmax # TODO se non funziona, togliere
         co2_forecast_1h_norm = (
             co2_forecast_1h - self.df["co2_intensity"].min()
         ) / (self.df["co2_intensity"].max() - self.df["co2_intensity"].min() + 1e-9)
@@ -157,8 +162,6 @@ class HPCBatteryEnv(gym.Env):
             # Aggiunge la riga
             with open(csv_path, "a", encoding="utf-8") as f:
                 f.write(f"{self.episode_idx};{sum(self.cost_history):.4f};{sum(self.co2_history)/1000:.3f}\n")
-
-            
 
 
         self.episode_idx += 1
@@ -432,21 +435,21 @@ if __name__ == "__main__":
         df["P_ren"]
         .rolling(window=steps_per_hour*6, min_periods=1)
         .sum()
-        .shift(-steps_per_hour)
+        .shift(-steps_per_hour*6)
         .fillna(0)
     )
     df["forecast_co2_intensity_1h"] = (
         df["co2_intensity"]
         .rolling(window=steps_per_hour, min_periods=1)
-        .sum()
+        .mean()
         .shift(-steps_per_hour)
         .fillna(0)
     )
     df["forecast_co2_intensity_6h"] = (
         df["co2_intensity"]
         .rolling(window=steps_per_hour*6, min_periods=1)
-        .sum()
-        .shift(-steps_per_hour)
+        .mean()
+        .shift(-steps_per_hour * 6)
         .fillna(0)
     )  
 
