@@ -1,10 +1,14 @@
 import pandas as pd
 
+
+###
+# QUesto file è stato realizzato calcolando l'intensità di co2, partendo da un file da 
+
 class CarbonIntensityModels:
-    def __init__(self, csv_file="electricitymaps_cache.csv"):
+    def __init__(self, csv_file="csvs/carbon_intensity_IT-NORTH-2020.csv"):
         """
         csv_file: il tuo CSV con colonne come
-        'Datetime (UTC)', 'Carbon intensity gCO₂eq/kWh (Life cycle)' ecc.
+        'Datetime (UTC)', 'Carbon intensity' ecc.
         """
         self.csv_file = csv_file
         self.co2_df = self._load_csv()
@@ -21,7 +25,7 @@ class CarbonIntensityModels:
             df.index = df.index.tz_localize("UTC")
 
         # prendiamo la colonna Life cycle
-        df = df.rename(columns={"Carbon intensity gCO₂eq/kWh (Life cycle)": "co2"})
+        df = df.rename(columns={"Carbon intensity": "co2"})
         return df[["co2"]]
 
     # ------------------------------------------
@@ -31,20 +35,22 @@ class CarbonIntensityModels:
         df = df.copy()
         df["time"] = pd.to_datetime(df["time"], utc=True)
 
-        # Mapping anni se necessario
-        csv_years = set(self.co2_df.index.year.unique())
-        df_years = set(df["time"].dt.year.unique())
-        missing_years = df_years - csv_years
+        # # Mapping anni se necessario
+        # csv_years = set(self.co2_df.index.year.unique())
+        # df_years = set(df["time"].dt.year.unique())
+        # missing_years = df_years - csv_years
 
-        if missing_years:
-            target_year = min(csv_years)
-            print(f"⚠️ Gli anni {missing_years} non sono presenti nel CSV, mapping su anno {target_year}")
-            df["time_mapped"] = df["time"].apply(lambda t: t.replace(year=target_year))
-        else:
-            df["time_mapped"] = df["time"]
+        # if missing_years:
+        #     target_year = min(csv_years)
+        #     print(f"⚠️ Gli anni {missing_years} non sono presenti nel CSV, mapping su anno {target_year}")
+        #     df["time_mapped"] = df["time"].apply(lambda t: t.replace(year=target_year))
+        # else:
+        #     df["time_mapped"] = df["time"]
 
-        # Impostiamo time_mapped come indice per interpolazione
-        df = df.set_index("time_mapped")
+        # # Impostiamo time_mapped come indice per interpolazione
+        # df = df.set_index("time_mapped")
+
+        df = df.set_index("time")
 
         # Merge con CSV
         df = df.merge(self.co2_df, how="left", left_index=True, right_index=True)
@@ -56,6 +62,10 @@ class CarbonIntensityModels:
         df = df.reset_index(drop=True)
 
         return df["co2"].values
+    
+    def co2_fixed(self, df):
+        return pd.Series(270, index=df.index)
+
 
 
         

@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import os
 
-from renewable_real import RenewableModels
-from co2 import CarbonIntensityModels
+from utils.renewable_real import RenewableModels
+from utils.co2 import CarbonIntensityModels
 
 MODEL_DIR = "models"
 MODEL_PATH = os.path.join(MODEL_DIR, "ppo_powercap")
@@ -56,12 +56,12 @@ class HPCBatteryEnv(gym.Env):
         self.prev_action = 0
 
         # -------------------------------
-        # Observation: [P_ratio, P_peak, battery_norm, time_left, price_base_norm, 
+        # Observation: [P_ratio, P_peak, battery_norm, time_left, price_base_norm, co2_intensity_norm
         # hour_sin, hour_cos, prev_a, P_ren_norm, forecast_ren_norm1h, forecast_ren_norm6h]
         # -------------------------------
         self.observation_space = spaces.Box(
-            low=np.array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.], dtype=np.float32),
-            high=np.array([3., 3., 1., 1., 1., 1., 1., 1., 1., 1., 0.1], dtype=np.float32)
+            low=np.array([0., 0., 0., 0., 0., 0., .0 ,0., 0., 0., 0., 0.], dtype=np.float32),
+            high=np.array([3., 3., 1., 1., 1., 1., .0 ,1., 1., 1., 1., 0.1], dtype=np.float32)
         )
 
         # -------------------------------
@@ -95,6 +95,9 @@ class HPCBatteryEnv(gym.Env):
 
         price_base = float(self.df.loc[t, "price_base"])
         price_base_norm = price_base / (self.df["price_base"].max() + 1e-9)
+        
+        co2_int = float(self.df.loc[t, "co2_intensity"])
+        co2_int_norm = price_base / (self.df["co2_intensity"].max() + 1e-9)
 
         time_left = 1.0 - (t / (self.N - 1))
         prev_a = getattr(self, "prev_action", 0.0)
@@ -111,7 +114,7 @@ class HPCBatteryEnv(gym.Env):
 
         obs = np.array([
             P_ratio, P_peak, battery_norm, time_left,
-            price_base_norm, hour_sin, hour_cos, prev_a,
+            price_base_norm, co2_int_norm, hour_sin, hour_cos, prev_a,
             P_ren_norm, E_forecast_1h_norm, E_forecast_6h_norm
         ], dtype=np.float32)
         return obs
@@ -275,16 +278,16 @@ class HPCBatteryEnv(gym.Env):
         # --------------------------------------------------------
         reward = 0
         # costo
-        # reward -= co2_g
+        reward -= co2_g
 
         reward -= cost 
         # Ridurre il picco energetico
-        reward -= 4.0 * (E_peak )
+        # reward -= 4.0 * (E_peak )
         # Favorire arbitraggio prezzo (carica quando costa poco, scarica quando costa molto)
-        if a > 0:
-            reward -= (price_base * E_charge)
-        if a < 0:
-            reward += (price_high * E_discharge)
+        # if a > 0:
+        #     reward -= (price_base * E_charge)
+        # if a < 0:
+        #     reward += (price_high * E_discharge)
 
         # ---------------------------------------------------------
         # LOGS
@@ -328,7 +331,7 @@ if __name__ == "__main__":
     # -------------------------------------------------------
     # RUN TRAINING
     # -------------------------------------------------------
-    df = pd.read_csv("cluster_power_only_nodes_10days.csv")
+    df = pd.read_csv("csvs/cluster_power_only_nodes_10days.csv")
     # df = pd.read_csv("cluster_power_only_nodes.csv")
 
     df["time"] = pd.to_datetime(df["time"])
@@ -350,7 +353,7 @@ if __name__ == "__main__":
     df["P_ren"]   = df["P_solar"] + df["P_wind"]
 
     # INSERISCO VALORI C02
-    cm = CarbonIntensityModels(csv_file="Co2_IT-NO_2021-2024_hourly.csv")
+    cm = CarbonIntensityModels(csv_file="csvs/carbon_intensity_IT-NORTH-2020.csv")
     df["co2_intensity"] = cm.co2_from_csv(df)
 
     # previsioni del tempo

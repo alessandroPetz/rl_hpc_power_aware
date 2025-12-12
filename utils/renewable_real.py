@@ -6,7 +6,7 @@ import numpy as np
 
 class RenewableModels:
 
-    def __init__(self, seed=42, cache_file="openmeteo_cache_bologna.csv"):
+    def __init__(self, seed=42, cache_file="csvs/openmeteo_cache_bologna.csv"):
         self.rng = np.random.default_rng(seed)
         self.cache_file = cache_file
 
@@ -58,11 +58,10 @@ class RenewableModels:
         return meteo_interp     
 
 
-
     # ----------------------------------------------------------------------
     # 🌬 MODELLO VENTO
     # ----------------------------------------------------------------------
-    def wind_from_openmeteo(self, df, p_max=150_000):
+    def wind_from_openmeteo(self, df, p_max=200_000):
         meteo = self._load_openmeteo(df)
         v = meteo["wind_speed"].values
 
@@ -76,7 +75,7 @@ class RenewableModels:
     # ----------------------------------------------------------------------
     # 🌞 MODELLO SOLARE
     # ----------------------------------------------------------------------
-    def solar_from_openmeteo(self, df, p_max=200_000):
+    def solar_from_openmeteo(self, df, p_max=250_000):
         meteo = self._load_openmeteo(df)
         G = meteo["radiation"].values
         G_max = max(G.max(), 1e-9)
