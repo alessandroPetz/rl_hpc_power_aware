@@ -61,7 +61,7 @@ class RenewableModels:
     # ----------------------------------------------------------------------
     # 🌬 MODELLO VENTO
     # ----------------------------------------------------------------------
-    def wind_from_openmeteo(self, df, p_max=200_000):
+    def wind_from_openmeteo(self, df, p_max=400_000):
         meteo = self._load_openmeteo(df)
         v = meteo["wind_speed"].values
 
@@ -75,7 +75,7 @@ class RenewableModels:
     # ----------------------------------------------------------------------
     # 🌞 MODELLO SOLARE
     # ----------------------------------------------------------------------
-    def solar_from_openmeteo(self, df, p_max=250_000):
+    def solar_from_openmeteo(self, df, p_max=450_000):
         meteo = self._load_openmeteo(df)
         G = meteo["radiation"].values
         G_max = max(G.max(), 1e-9)
