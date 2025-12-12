@@ -104,7 +104,7 @@ class HPCBatteryEnv(gym.Env):
         price_base_norm = price_base / (self.df["price_base"].max() + 1e-9)
         
         co2_int = float(self.df.loc[t, "co2_intensity"])
-        co2_int_norm = price_base / (self.df["co2_intensity"].max() + 1e-9)
+        co2_int_norm = co2_int / (self.df["co2_intensity"].max() + 1e-9)
 
         time_left = 1.0 - (t / (self.N - 1))
         prev_a = getattr(self, "prev_action", 0.0)
@@ -119,17 +119,16 @@ class HPCBatteryEnv(gym.Env):
         E_forecast_1h_norm = E_forecast_1h / (self.capacity + 1e-9)
         E_forecast_6h_norm = E_forecast_6h / (6.0 * self.capacity + 1e-9)  # opzionale scaling
 
-        co2_forecast_1h = float(self.df.loc[t, "forecast_P_ren_1h"])  # qui è energia Wh (sum)
-        co2_forecast_6h = float(self.df.loc[t, "forecast_P_ren_6h"])
+        co2_forecast_1h = float(self.df.loc[t, "forecast_co2_intensity_1h"])
+        co2_forecast_6h = float(self.df.loc[t, "forecast_co2_intensity_6h"])
 
         # normalizzo minmax # TODO se non funziona, togliere
-        co2_forecast_1h_norm = (
-            co2_forecast_1h - self.df["co2_intensity"].min()
-        ) / (self.df["co2_intensity"].max() - self.df["co2_intensity"].min() + 1e-9)
+        co2_min = self.df["co2_intensity"].min()
+        co2_max = self.df["co2_intensity"].max()
 
-        co2_forecast_6h_norm = (
-            co2_forecast_6h - self.df["co2_intensity"].min()
-        ) / (self.df["co2_intensity"].max() - self.df["co2_intensity"].min() + 1e-9)
+        co2_int_norm = (co2_int - co2_min) / (co2_max - co2_min + 1e-9)
+        co2_forecast_1h_norm = (co2_forecast_1h - co2_min) / (co2_max - co2_min + 1e-9)
+        co2_forecast_6h_norm = (co2_forecast_6h - co2_min) / (co2_max - co2_min + 1e-9)
 
         obs = np.array([
             P_ratio, P_peak, battery_norm, time_left,
@@ -294,7 +293,7 @@ class HPCBatteryEnv(gym.Env):
         # costo
         reward -= co2_g
 
-        # reward -= cost 
+        reward -= cost 
         # Ridurre il picco energetico
         # reward -= 4.0 * (E_peak )
         # Favorire arbitraggio prezzo (carica quando costa poco, scarica quando costa molto)
