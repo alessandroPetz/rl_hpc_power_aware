@@ -293,7 +293,7 @@ class HPCBatteryEnv(gym.Env):
         # costo
         reward -= co2_g
 
-        reward -= cost 
+        #reward -= cost 
         # Ridurre il picco energetico
         # reward -= 4.0 * (E_peak )
         # Favorire arbitraggio prezzo (carica quando costa poco, scarica quando costa molto)
@@ -464,20 +464,20 @@ if __name__ == "__main__":
 
     # questa rete sembra fuznionare, più lenta ma fa meglio..
     
-    # model = PPO(
-    #     "MlpPolicy",
-    #     vec_env,
-    #     learning_rate=1e-4,
-    #     n_steps=4096,
-    #     batch_size=512,
-    #     gae_lambda=0.92,
-    #     ent_coef=0.01,
-    #     clip_range=0.15,
-    #     max_grad_norm=0.5,
-    #     verbose=0,
-    #     device="cpu"
-    # )   
-    model = PPO("MlpPolicy", vec_env,verbose=0,device="cpu")
+    model = PPO(
+        "MlpPolicy",
+        vec_env,
+        learning_rate=1e-4,
+        n_steps=4096,
+        batch_size=512,
+        gae_lambda=0.92,
+        ent_coef=0.01,
+        clip_range=0.15,
+        max_grad_norm=0.5,
+        verbose=0,
+        device="cpu"
+    )   
+    # model = PPO("MlpPolicy", vec_env,verbose=0,device="cpu")
 
     #model.learn(total_timesteps=250_000)
     model.learn(total_timesteps=10_000_000)
