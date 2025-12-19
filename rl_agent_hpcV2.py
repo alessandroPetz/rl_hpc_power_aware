@@ -28,7 +28,9 @@ class HPCBatteryEnv(gym.Env):
         threshold=400000,
         battery_capacity=3200000,
         max_charge_rate=3200000,      # Wh/h
-        max_discharge_rate=3200000
+        max_discharge_rate=3200000,
+        alpha=1.0,
+        beta=1.0
         # fattore medio (gCO2 per kWh) — scegli il valore adatto (es. 270 gCO2/kWh per ITA come esempio)
         # CO2_G_PER_KWH_STATIC = 270.0
 
@@ -43,6 +45,9 @@ class HPCBatteryEnv(gym.Env):
         self.co2_history = []
         self.curtailment_history= []
         ## LOG ##
+
+        self.alpha = alpha
+        self.beta = beta
 
 
         self.df = df.reset_index(drop=True)
@@ -212,7 +217,8 @@ class HPCBatteryEnv(gym.Env):
         P_surplus  = max(P_ren - P_from_ren, 0.0)
 
         # ---------------------------------------------------------
-        # 1A. SE C'È SURPLUS: CARICA LA BATTERIA E FINE STEP
+        # 1A. SE C'È SURPLUS: CARICA LA BATTERIA con REN 
+        # carica anche dalla rete se a > 0
         # ---------------------------------------------------------
         if P_surplus > 0:
             E_surplus = P_surplus * dt                     # Wh
@@ -226,11 +232,37 @@ class HPCBatteryEnv(gym.Env):
 
             # reward: gratis → positivo se usi rinnovabile
             reward = 0
+            cost=0
+            co2_g=0
+
+            # # aggiungo possibilità di caricare anche da rete,
+            # # di notte può esssere vantaggioso?
+            # # ------------------------------------------------- 
+            # if a > 0 and self.battery < self.capacity:
+            #     max_charge_wh = a* self.max_charge_rate * dt
+            #     room = self.capacity - self.battery
+            #     E_charge = min(max_charge_wh, room)
+            #     self.battery += E_charge
+
+            #     P_grid = E_charge / dt if dt > 0 else 0
+
+            #     E_base = min(P_grid, self.threshold) * dt
+            #     E_peak = max(P_grid - self.threshold, 0) * dt
+
+            #     cost = E_base * price_base + E_peak * price_high
+                
+
+            #     # CALCOLO co2
+            #     co2_g = (E_base + E_peak) / 1000 * CO2_G_PER_KWH
+
+            # # aggiungo possibilità di caricare anche da rete
+            # # ------------------------------------------------- 
+
 
             # logs
             self.battery_history.append(self.battery)
-            self.cost_history.append(0.0)
-            self.co2_history.append(0.0)
+            self.cost_history.append(cost)
+            self.co2_history.append(co2_g)
             self.curtailment_history.append(E_curtail)
             self.time_history.append(time)
 
@@ -290,10 +322,7 @@ class HPCBatteryEnv(gym.Env):
         # 4. REWARD (stesso stile del tuo)
         # --------------------------------------------------------
         reward = 0
-        # costo
-        reward -= co2_g
-
-        #reward -= cost 
+        reward = - self.alpha * cost - self.beta * co2_g
         # Ridurre il picco energetico
         # reward -= 4.0 * (E_peak )
         # Favorire arbitraggio prezzo (carica quando costa poco, scarica quando costa molto)
@@ -452,8 +481,16 @@ if __name__ == "__main__":
         .fillna(0)
     )  
 
-
-    vec_env = DummyVecEnv([lambda: HPCBatteryEnv(df)])
+    env= HPCBatteryEnv(
+        df, 
+        threshold=400000,
+        battery_capacity=3200000,
+        max_charge_rate=3200000,      # Wh/h
+        max_discharge_rate=3200000,
+        alpha=0.2, 
+        beta=0.8
+    )
+    vec_env = DummyVecEnv([lambda: env])
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_reward=10.0)    # Option Reward = False
 
 
