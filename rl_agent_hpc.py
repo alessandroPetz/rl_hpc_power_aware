@@ -1,3 +1,18 @@
+####
+
+# IN QUESTA SIMULAZIONE, LA BATTERIA DIVENTA UN ACCUMULATORE DI ENERGIA RINNOVABILE
+# AD OGNI STEP, SI CERCA DI COPRIRE LA RICHISTA DEL CLUSTER CON LE RINNOVABILI
+# SE AVANZA ENERGIA RINNOVABILE, SI CARICA LA BATTERIA
+# SE NON BASTA, SI USA LA BATTTERIA
+# SE NON BASTA NEANCHE LA BATTERIA, SI USA LA RETE ELETTRICA (APPLICANDO COSTI E THRESHOLD COME IN PRECEDENZA) 
+
+# RL agent per cercare di migliorare rispetto alla regola base
+# qui si cerca di minimizzare sia il costo che il co2
+
+####
+
+
+
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
@@ -9,8 +24,14 @@ import torch as th
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import os
+import shutil
 
-MODEL_DIR = "models"
+from utils.renewable_real import RenewableModels
+from utils.co2 import CarbonIntensityModels
+from utils.battery_model import Battery
+
+OUTPUT_DIR = "outputRL"
+MODEL_DIR = OUTPUT_DIR + "/models"
 MODEL_PATH = os.path.join(MODEL_DIR, "ppo_powercap")
 VEC_PATH = os.path.join(MODEL_DIR, "vecnormalize.pkl")
 
@@ -22,9 +43,13 @@ class HPCBatteryEnv(gym.Env):
         self, 
         df, 
         threshold=400000,
-        battery_capacity=400000,
-        max_charge_rate=400000,      # Wh/h
-        max_discharge_rate=400000
+        battery_capacity=3200000,
+        max_charge_rate=3200000,      # Wh/h
+        max_discharge_rate=3200000,
+        alpha=1.0,
+        beta=1.0
+        # fattore medio (gCO2 per kWh) — scegli il valore adatto (es. 270 gCO2/kWh per ITA come esempio)
+        # CO2_G_PER_KWH_STATIC = 270.0
 
     ):
         super().__init__()
@@ -34,7 +59,12 @@ class HPCBatteryEnv(gym.Env):
         self.battery_history = []
         self.time_history = []
         self.cost_history = []
+        self.co2_history = []
+        self.curtailment_history= []
         ## LOG ##
+
+        self.alpha = alpha
+        self.beta = beta
 
 
         self.df = df.reset_index(drop=True)
@@ -49,79 +79,85 @@ class HPCBatteryEnv(gym.Env):
         self.prev_action = 0
 
         # -------------------------------
-        # Observation: [P_ratio, P_peak, battery_norm, time_norm, price_base_norm]
-        #              [P_ratio, P_peak, battery_norm, time_left, price_base_norm, hour_sin, hour_cos, prev_a]
+        # Observation: [P_ratio, P_peak, battery_norm, time_left, price_base_norm, co2_intensity_norm
+        # hour_sin, hour_cos, prev_a, P_ren_norm, forecast_ren_norm1h, forecast_ren_norm6h, 
+        # co2_forecast_1h_norm, co2_forecast_6h_norm]
         # -------------------------------
         self.observation_space = spaces.Box(
-            low=np.array([0., 0., 0., 0., 0., 0., 0., 0.], dtype=np.float32),
-            high=np.array([3., 3., 1., 1., 1., 1., 1., 1.], dtype=np.float32)
+            low=np.array([0., 0., 0., 0., 0., 0., 0. ,0., 0., 0., 0., 0., 0., 0. ], dtype=np.float32),
+            high=np.array([3., 3., 1., 1., 1., 1., 1. ,1., 2., 4., 1., 1., 1., 1.], dtype=np.float32)
         )
+        # senza c02 forcasting
+        # self.observation_space = spaces.Box(
+        #     low=np.array([0., 0., 0., 0., 0., 0., 0. ,0., 0., 0., 0., 0. ], dtype=np.float32),
+        #     high=np.array([3., 3., 1., 1., 1., 1., 1. ,1., 1., 1., 1., 1.], dtype=np.float32)
+        # )
 
         # -------------------------------
         # Action = singola variabile [-1, 1]
         # a < 0 → scarica
         # a > 0 → carica
         # -------------------------------
-        # # action discreta
-        # self.action_space = spaces.Box(
-        #     low=np.array([-1.], dtype=np.float32),
-        #     high=np.array([1.], dtype=np.float32)
-        # )
-        # action discreta
-        self.action_levels = np.array([-1.0, -0.5, -0.2, 0.0, 0.2, 0.5, 1.0], dtype=np.float32)
-        #self.action_levels = np.array([-1.0, 0.0, 1.0], dtype=np.float32)
-        self.action_space = spaces.Discrete(len(self.action_levels))
+        
+
+        # ACTION DISCRETA
+        # self.action_levels = np.array([-1.0, -0.5, -0.2, 0.0, 0.2, 0.5, 1.0], dtype=np.float32)
+        # self.action_space = spaces.Discrete(len(self.action_levels))
+        
+        # ACTION CONTINUA
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
  
 
         self.reset()
 
     def _get_obs(self):
-
-
-        # TODO dare informazione di tutta la fascia oraria e prezzo
-
         t = min(self.t, self.N - 1)
-        P = float(self.df.loc[t, "power"])
-        # existing
+        P = float(self.df.loc[t, "power"])          # W
         P_ratio = np.clip(P / self.threshold, 0, 3)
         P_peak  = np.clip(max(P - self.threshold, 0) / self.threshold, 0, 3)
-        battery_norm = self.battery / self.capacity
-        # time cyclical
+        battery_norm = float(self.battery.energy / self.battery.capacity)
+
         ts = self.df.loc[t, "time"]
-        hour = ts.hour + ts.minute/60.0
+        hour = ts.hour + ts.minute / 60.0
         hour_sin = np.sin(2 * np.pi * hour / 24.)
         hour_cos = np.cos(2 * np.pi * hour / 24.)
-        # price normalized
+
         price_base = float(self.df.loc[t, "price_base"])
-        price_base_norm = price_base / self.df["price_base"].max()
-        # remaining proportion of episode
-        time_left = 1.0 - (t / (self.N - 1))
-        # previous action (keep as scalar normalized -1..1)
-        prev_a = getattr(self, "prev_action", 0.0)
-        return np.array([P_ratio, P_peak, battery_norm, time_left, price_base_norm, hour_sin, hour_cos, prev_a], dtype=np.float32)
-
-    # def _get_obs(self):
-    #     t = min(self.t, self.N - 1)
-    #     P = float(self.df.loc[t, "power"])
-
-    #     P_ratio = np.clip(P / self.threshold, 0, 3)
+        price_base_norm = price_base / (self.df["price_base"].max() + 1e-9)
         
-    #     P_peak  = np.clip(max(P - self.threshold, 0) / self.threshold, 0, 3)
-    #     battery_norm = self.battery / self.capacity
-    #     time_norm = t / (self.N - 1)
+        co2_int = float(self.df.loc[t, "co2_intensity"])
+        co2_int_norm = co2_int / (self.df["co2_intensity"].max() + 1e-9)
 
-    #     # prezzi normalizzati
-    #     price_base = float(self.df.loc[t, "price_base"])
-    #     price_base_norm = price_base / self.df["price_base"].max()
+        time_left = 1.0 - (t / (self.N - 1))
+        prev_a = getattr(self, "prev_action", 0.0) +1   # in obs 0-2 solo positivi???
 
+        P_ren = float(self.df.loc[t, "P_ren"])
+        P_ren_norm = P_ren / (self.threshold + 1e-9)   # può superare 1
 
-        # return np.array([
-        #     P_ratio,
-        #     P_peak,
-        #     battery_norm,
-        #     time_norm,
-        #     price_base_norm
-        # ], dtype=np.float32)
+        E_forecast_1h = float(self.df.loc[t, "forecast_P_ren_1h"])  # qui è energia Wh (sum)
+        E_forecast_6h = float(self.df.loc[t, "forecast_P_ren_6h"])
+
+        # normalizzo forecast su capacità (Wh)
+        E_forecast_1h_norm = E_forecast_1h / (self.capacity + 1e-9)
+        E_forecast_6h_norm = E_forecast_6h / (6.0 * self.capacity + 1e-9)  # opzionale scaling
+
+        co2_forecast_1h = float(self.df.loc[t, "forecast_co2_intensity_1h"])
+        co2_forecast_6h = float(self.df.loc[t, "forecast_co2_intensity_6h"])
+
+        # normalizzo minmax # TODO se non funziona, togliere
+        co2_min = self.df["co2_intensity"].min()
+        co2_max = self.df["co2_intensity"].max()
+
+        co2_int_norm = (co2_int - co2_min) / (co2_max - co2_min + 1e-9)
+        co2_forecast_1h_norm = (co2_forecast_1h - co2_min) / (co2_max - co2_min + 1e-9)
+        co2_forecast_6h_norm = (co2_forecast_6h - co2_min) / (co2_max - co2_min + 1e-9)
+
+        obs = np.array([
+            P_ratio, P_peak, battery_norm, time_left,
+            price_base_norm, co2_int_norm, hour_sin, hour_cos, prev_a,
+            P_ren_norm, E_forecast_1h_norm, E_forecast_6h_norm, co2_forecast_1h_norm, co2_forecast_6h_norm
+        ], dtype=np.float32)
+        return obs
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -135,253 +171,371 @@ class HPCBatteryEnv(gym.Env):
             plt.title("Battery State of Charge Over Time")
             plt.grid(True)
             plt.tight_layout()
-            filename = f"plots/battery_plot_ep{self.episode_idx}.png"
+            filename = f"{OUTPUT_DIR}/plots/battery_plot_ep{self.episode_idx}.png"
             plt.savefig(filename)
             plt.close()
 
-            print(f"[Episode {self.episode_idx}] total cost = {sum(self.cost_history) :.4f}")
+            #print(f"[Episode {self.episode_idx}] total cost = {sum(self.cost_history) :.4f}")
+            #print(f"[Episode {self.episode_idx}] CO2 totale (kg): {sum(self.co2_history)/1000:.3f}")
+
+            csv_path = os.path.join(".", OUTPUT_DIR ,"results.csv")
+
+            # Aggiunge la riga
+            with open(csv_path, "a", encoding="utf-8") as f:
+                f.write(f"{self.episode_idx};{sum(self.cost_history):.4f};{sum(self.co2_history)/1000:.3f}\n")
 
 
         self.episode_idx += 1
         self.battery_history = [self.capacity / 2]
         self.time_history =  [self.df.loc[0, "time"]]
         self.cost_history = [0]
+        self.co2_history = [0]
+        self.curtailment_history= [0]
         ## END PLOT LOG ##
 
         self.t = 0
-        self.battery = self.capacity / 2  # inizialmente piena
+        self.battery = Battery(
+            capacity_wh=self.capacity,
+            initial_charge_wh=self.capacity / 2,
+            max_charge_rate_w=self.max_charge_rate,
+            max_discharge_rate_w=self.max_discharge_rate,
+        )
         return self._get_obs(), {}
+
 
     def step(self, action):
 
-        # if self.t >= self.N - 1:
-        #     return self._get_obs(), 0.0, True, False, {}
-        
-        # # action continua
-        # a = float(action[0])   # a > 0 → carica, a < 0 → scarica
-        # action discreta
-        a = float(self.action_levels[action])
-        self.prev_action = a 
+        # --- ACTION ---
+        # a in [-1,1], a<0 scarica; a=0 neutro; a>0 carica da rete
+        # action DISCRETA
+        #  a = float(self.action_levels[action])
+        # action CONTINUA
+        a = float(action[0])
+
+        self.prev_action = a
 
         t = self.t
-        P = float(self.df.loc[t, "power"])
         dt = float(self.df.loc[t, "dt_hours"])
+        time = self.df.loc[t, "time"]
 
+        P_load = float(self.df.loc[t, "power"])      # W
+        P_ren  = float(self.df.loc[t, "P_ren"])      # W
+
+        price_base = float(self.df.loc[t, "price_base"])
+        price_high = float(self.df.loc[t, "price_high"])
+
+        CO2_G_PER_KWH = float(self.df.loc[t, "co2_intensity"])
+
+        # se dt=0: no avanzamento fisico
         if dt == 0:
             self.t += 1
             terminated = self.t > self.N - 1
             return self._get_obs(), 0.0, terminated, False, {}
 
-        # -----------------------------------
-        # 1. ENERGIA AZIONE (libera)
-        # -----------------------------------
+        # ---------------------------------------------------------
+        # 1. USA LA RINNOVABILE PER COPRIRE IL CARICO
+        # ---------------------------------------------------------
+        P_from_ren = min(P_load, P_ren)
+        P_surplus  = max(P_ren - P_from_ren, 0.0)
+
+        # ---------------------------------------------------------
+        # 1A. SE C'È SURPLUS: CARICA LA BATTERIA con REN 
+        # carica anche dalla rete se a > 0
+        # ---------------------------------------------------------
+        if P_surplus > 0:
+            E_surplus = P_surplus * dt                     # Wh
+
+            E_charged = self.battery.charge(P_surplus, dt)
+            E_curtail = E_surplus - E_charged
+
+
+            # reward: gratis → positivo se usi rinnovabile
+            reward = 0
+            cost=0
+            co2_g=0
+
+            # # aggiungo possibilità di caricare anche da rete,
+            # # di notte può esssere vantaggioso?
+            # # ------------------------------------------------- 
+            # if a > 0:
+            #     # energia realmente assorbita dalla rete (Wh)
+            #     E_charged_grid = self.battery.charge(
+            #         a * self.max_charge_rate,  # W
+            #         dt                          # h
+            #     )
+
+            #     # caricare da rete aumenta la richiesta verso la rete
+            #     E_needed += E_charged_grid
+
+            #     # potenza media dalla rete per il charging
+            #     P_grid_charge = E_charged_grid / dt if dt > 0 else 0
+
+            #     E_base_charge = min(P_grid_charge, self.threshold) * dt
+            #     E_peak_charge = max(P_grid_charge - self.threshold, 0) * dt
+
+            #     cost += E_base_charge * price_base + E_peak_charge * price_high
+            #     co2_g += (E_base_charge + E_peak_charge) / 1000 * CO2_G_PER_KWH
+
+            # # aggiungo possibilità di caricare anche da rete
+            # # ------------------------------------------------- 
+
+
+            # logs
+            self.battery_history.append(self.battery.energy)
+            self.cost_history.append(cost)
+            self.co2_history.append(co2_g)
+            self.curtailment_history.append(E_curtail)
+            self.time_history.append(time)
+
+            self.t += 1
+            terminated = self.t > self.N - 1
+            return self._get_obs(), float(reward), terminated, False, {}
+
+        # ---------------------------------------------------------
+        # 2. NON C'È SURPLUS → RESTO DA COPRIRE
+        # ---------------------------------------------------------
+        P_remaining = P_load - P_from_ren       # W
+        E_needed = P_remaining * dt             # Wh
+
+        E_curtail = 0.0
         
-        # ------START MANIPULATING ACTION ----
-        # ------------------------------------
-
-        # 1) come in simulazione senza batteria
-        # a=0
-        #
-        # 2) come in simulaizone con batteria, 
-        # la differenza è che qui carico o scarico sempre al massimo, in simulazione sono limitato dal threshold
-        #
-        # if P <= self.threshold :
-        #     # carico la batteria
-        #     a = 1
+        #a=-1 if unconmmented = sim standard
         
-        # else:
-        #     # uso  la batteria
-        #     a = -1
-        #
-        #
-        # 3) innesto manualmente regola per comportarmi più similmente alla sim deterministica con batteria
-        # se sono sotto threshold non posso usare la batteria
-        # se sono sopra threshold non posso caricarla.
-        # difff con 2) qui posso avere a in percentuale
-        # 
-        # if P <= self.threshold :
-        #     a = max (a,0)
-        # else:
-        #     a = min (a,0)
-        
-        # ----------------------------------- 
-        # ----- END MANIPULATING ACTION -----
+        # ---------------------------------------------------------
+        # 2A. SE a < 0 → USA LA BATTERIA
+        # ---------------------------------------------------------
+        if a < 0:
+            E_from_batt = self.battery.discharge(-a * self.max_discharge_rate, dt)
+            E_needed -= E_from_batt
 
-
-
+        # ---------------------------------------------------------
+        # 2B. SE a > 0 → CARICA DA RETE
+        # ---------------------------------------------------------
         if a > 0:
-            # CARICO LA BATTERIA
-            E_charge_req = a * self.max_charge_rate * dt
-            E_charge = min(E_charge_req, self.capacity - self.battery)
-            #E_charge = min(E_charge_req, self.capacity - self.battery, (self.threshold - P) * dt)   # LIMITA la batteria a non caricarsi con costo HIGH
-                                                                                                    # aggiunta al 2, comportamente come sim con batteria 
-            E_discharge = 0.0
-        else:
-            # USO LA BATTERIA
-            E_discharge_req = -a * self.max_discharge_rate * dt
-            E_discharge = min(E_discharge_req, self.battery)
-            # E_discharge = min(E_discharge_req, self.battery, max(P - self.threshold, 0) * dt)   # LIMITA la batteria a coprire al massimo il picco
-                                                                                                # aggiunta al 2, comportamente come sim con batteria  
-            E_charge = 0.0
-
-        # -----------------------------------
-        # 2. POTENZA VISTA DALLA RETE (libera)
-        # -----------------------------------
-        # P_charge = potenza assorbita per caricare la batteria
-        # P_discharge = potenza "negativa" vista dalla rete
-        P_charge     = E_charge     / dt
-        P_discharge  = E_discharge  / dt
-
-        # Potenza effettiva che si chiede alla rete
-        P_grid = P + P_charge - P_discharge
-        P_grid = max(P_grid, 0)  # Non può essere negativa
-
-        # -----------------------------------
-        # 3. ENERGIA DA RETE IN QUESTO STEP
-        # -----------------------------------
-        E_grid = P_grid * dt
-
-        # Divisa in:
-        E_base  = min(P_grid, self.threshold) * dt
-        E_peak  = max(P_grid - self.threshold, 0) * dt
-
-        # -----------------------------------
-        # 4. COSTO (modello generale)
-        # -----------------------------------
-        price_base  = self.df.loc[t, "price_base"]
-        price_high = self.df.loc[t, "price_high"]
-
-        cost = (E_base * price_base) + (E_peak * price_high)
-        #print(cost)
-
-        # -----------------------------------
-        # 5. AGGIORNA BATTERIA
-        # -----------------------------------
-        self.battery += E_charge
-        self.battery -= E_discharge
-        self.battery = np.clip(self.battery, 0, self.capacity)
-
-        # -----------------------------------
-        # 6. REWARD
-        # -----------------------------------
-
-        # 1) Reward base: costo negativo
-        reward = cost
+            E_charged_grid = self.battery.charge(a * self.max_charge_rate, dt)
+            E_needed += E_charged_grid
 
 
-        # 2) Penalità per caricare quando il prezzo è alto
-        # if a > 0:   # sta caricando
-        #     reward -= price_base * E_charge * 0.5
+        # ---------------------------------------------------------
+        # 3. ENERGIA FINALE DALLA RETE (Wh)
+        # ---------------------------------------------------------
+        P_grid = E_needed / dt if dt > 0 else 0
 
-        # 3) Bonus per scaricare quando il prezzo è alto (arbitraggio)
-        # price_mean = self.df["price_base"].mean()
-        # if a < 0:   # sta scaricando
-        #     reward += max(price_base - price_mean, 0) * E_discharge * 2.0
+        E_base = min(P_grid, self.threshold) * dt
+        E_peak = max(P_grid - self.threshold, 0) * dt
 
-        # --- MALUS basato sulla logica richiesta ---
+        cost = E_base * price_base + E_peak * price_high
+        
 
-        # # caso 1) SCARICA senza picco (P <= threshold)
-        # if a < 0 and P <= self.threshold:
-        #     # malus proporzionale al prezzo base
-        #     reward -= E_discharge * price_base
-
-        # # caso 2) CARICA durante il picco (P > threshold)
-        # if a > 0 and P > self.threshold:
-        #     # malus proporzionale al prezzo alto
-        #     reward -= E_charge * price_high
-
-        # if P <= self.threshold:
-        #     energy_used = E_charge + E_discharge
-        #     reward -= energy_used * price_base  # scoraggia attività inutile
-
-        # # 4) Bonus finale per batteria piena
-        # if self.t == self.N - 1:   # episodio finito
-        #     reward += (self.battery / self.capacity) * 50.0
-
-        # # costo se uso la batteria, piutoto che non usarla.
-        # cost_scale = 10_000   # ✅ valore corretto per il tuo problema
-        # action_cost = 0.01 * (abs(a) * self.max_charge_rate * dt) / cost_scale
-        # reward -= action_cost
-
-        # # penalty per picco istantaneo
-        # peak_penalty = 10.0 * max(P_grid - self.threshold, 0) * dt / cost_scale
-        # reward -= peak_penalty
+        # CALCOLO co2
+        co2_g = (E_base + E_peak) / 1000 * CO2_G_PER_KWH
 
 
-        # # 4) costo totale a fine episodio
-        if self.t == self.N - 1:   # episodio finito
-            reward -= sum(self.cost_history)
+        # ---------------------------------------------------------
+        # 4. REWARD (stesso stile del tuo)
+        # --------------------------------------------------------
+        reward = 0
+        reward = - self.alpha * cost - self.beta * co2_g
 
-        # -----------------------------------
-        # 7. TEMPO
-        # -----------------------------------s<
+        # Ridurre il picco energetico
+        # reward -= 4.0 * (E_peak )
+        # Favorire arbitraggio prezzo (carica quando costa poco, scarica quando costa molto)
+        # if a > 0:
+        #     reward -= (price_base * E_charge)
+        # if a < 0:
+        #     reward += (price_high * E_discharge)
+
+        # ---------------------------------------------------------
+        # LOGS
+        # ---------------------------------------------------------
+        self.battery_history.append(self.battery.energy)
+        self.cost_history.append(cost)
+        self.co2_history.append(co2_g)
+        self.curtailment_history.append(E_curtail)
+        self.time_history.append(time)
+
+        self.battery.step(dt)
         self.t += 1
         terminated = self.t > self.N - 1
 
-        ## LOG ##
-        self.battery_history.append(self.battery)
-        self.cost_history.append(cost)
-        self.time_history.append(self.df.loc[t, "time"])
-        ## LOG ##
 
+        # shape reward
+        if terminated:
+            reward -= sum(self.cost_history)
+            # reward -= sum(self.co2_history)
 
-        return self._get_obs(), reward, terminated, False, {}                  
+        return self._get_obs(), float(reward), terminated, False, {}
 
 
 
 def dynamic_low_price(timestamp):
     hour = timestamp.hour
     if 0 <= hour < 6:
-        return 0.0005
+        return 0.0002
     elif 6 <= hour < 22:
         return 0.0012
     else:
-        return 0.0007
-        
+        return 0.0005
+
+def pulizia_progetto(base_path="."):
+    plots_trovata = False
+    results_trovato = False
+    path_results = None
+
+    for root, dirs, files in os.walk(base_path):
+
+        if os.path.basename(root) != OUTPUT_DIR:
+            continue
+
+        # --- Gestione cartella plots ---
+        if "plots" in dirs and not plots_trovata:
+            plots_trovata = True
+            plots_path = os.path.join(root, "plots")
+            print(f"Trovata cartella: {plots_path}")
+
+            for item in os.listdir(plots_path):
+                item_path = os.path.join(plots_path, item)
+                if os.path.isfile(item_path) or os.path.islink(item_path):
+                    os.remove(item_path)
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+
+            print("Cartella 'plots' svuotata.")
+
+        # --- Gestione file results.csv ---
+        if "results.csv" in files and not results_trovato:
+            results_trovato = True
+            path_results = os.path.join(root, "results.csv")
+            print(f"Trovato file: {path_results}")
+
+    # --- Scrittura o creazione results.csv ---
+    intestazioni = "episodio;total_cost;total_co2\n"
+
+    if results_trovato:
+        with open(path_results, "w", encoding="utf-8") as f:
+            f.write(intestazioni)
+        print(f"File {OUTPUT_DIR}/results.csv svuotato e intestazioni riscritte.")
+    else:
+        path_results = os.path.join(base_path, OUTPUT_DIR, "results.csv")
+        os.makedirs(os.path.dirname(path_results), exist_ok=True)
+        with open(path_results, "w", encoding="utf-8") as f:
+            f.write(intestazioni)
+        print(f"Creato nuovo file: {path_results}")
+
+    if not plots_trovata:
+        print("Nessuna cartella 'plots' trovata.")
+
+
+
+
+# Implementato:
+# forecasting meteo, forecasting c02 
+# dati meteo reali, co2 intensity reale,  
+
+
+
 if __name__ == "__main__":
+
+    # elimino vecchi plots
+    # svuota resluts.csv
+    pulizia_progetto(".")
+    print("Start to training.... results in resuts.csv")
+
     # -------------------------------------------------------
     # RUN TRAINING
     # -------------------------------------------------------
-    df = pd.read_csv("cluster_power_only_nodes_10days.csv")[8641:]
+    df = pd.read_csv("csvs/cluster_power_only_nodes_10days.csv")
     # df = pd.read_csv("cluster_power_only_nodes.csv")
 
     df["time"] = pd.to_datetime(df["time"])
     df["dt_hours"] = df["time"].diff().dt.total_seconds() / 3600
     df["dt_hours"] = df["dt_hours"].fillna(0)
     
+    # INSERISCO PREZZI
     df["price_base"] = df["time"].apply(dynamic_low_price)
-    df["price_high"] = df["price_base"] * 3  
+    df["price_high"] = df["price_base"] * 3
 
+    # INSERISCO VALORI RINNOVABILI
+    rm = RenewableModels(seed=42)
+    #df["P_solar"] = rm.solar_cloudy2(df)
+    #df["P_solar"] = rm.solar_simple(df)
+    #df["P_wind"] = rm.wind_stochastic(df)
+    #df["P_wind"] = rm.wind_uniform(df)
+    df["P_wind"] = rm.wind_from_openmeteo(df)
+    df["P_solar"] = rm.solar_from_openmeteo(df)
+    df["P_ren"]   = df["P_solar"] + df["P_wind"]
 
-    vec_env = DummyVecEnv([lambda: HPCBatteryEnv(df)])
-    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_reward=10.0)
-    # if os.path.exists(VEC_PATH):
-    #     print("[Main] Carico VecNormalize esistente...")
-    #     env = VecNormalize.load(VEC_PATH, env)
-    # else:
-    #     print("[Main] Crete new VecNormalize...")
-    #     env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_reward=10.0)
+    # INSERISCO VALORI C02
+    cm = CarbonIntensityModels(csv_file="csvs/carbon_intensity_IT-NORTH-2020.csv")
+    df["co2_intensity"] = cm.co2_from_csv(df)
+
+    # previsioni del tempo e co2 intensity
+    steps_per_hour = int(3600 / 20)
+    df["forecast_P_ren_1h"] = (
+        df["P_ren"]
+        .rolling(window=steps_per_hour, min_periods=1)
+        .sum()
+        .shift(-steps_per_hour)
+        .fillna(0)
+    )
+    df["forecast_P_ren_6h"] = (
+        df["P_ren"]
+        .rolling(window=steps_per_hour*6, min_periods=1)
+        .sum()
+        .shift(-steps_per_hour*6)
+        .fillna(0)
+    )
+    df["forecast_co2_intensity_1h"] = (
+        df["co2_intensity"]
+        .rolling(window=steps_per_hour, min_periods=1)
+        .mean()
+        .shift(-steps_per_hour)
+        .fillna(0)
+    )
+    df["forecast_co2_intensity_6h"] = (
+        df["co2_intensity"]
+        .rolling(window=steps_per_hour*6, min_periods=1)
+        .mean()
+        .shift(-steps_per_hour * 6)
+        .fillna(0)
+    )  
+
+    env= HPCBatteryEnv(
+        df, 
+        threshold=400000,
+        battery_capacity=3200000,
+        max_charge_rate=3200000,      # Wh/h
+        max_discharge_rate=3200000,
+        alpha=0.2, 
+        beta=0.8
+    )
+    vec_env = DummyVecEnv([lambda: env])
+    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_reward=10.0)    # Option Reward = False
+
 
     policy_kwargs = dict(
         net_arch=[256, 256, 128],
         activation_fn=th.nn.ReLU
     )
 
+    # questa rete sembra fuznionare, più lenta ma fa meglio..
+    
     model = PPO(
         "MlpPolicy",
         vec_env,
-        policy_kwargs=policy_kwargs,
-        learning_rate=3e-4,
-        n_steps=16384,          # raccolgo questa quantità di step prima di fare un update
-        #n_steps=4096,
-        batch_size=256,
-        #batch_size=64,
-        ent_coef=0.03,    # aumentare per esplorare di più (se si blocca in locale minimo)
-        gae_lambda=0.95,
-        clip_range=0.2,
+        learning_rate=1e-4,
+        n_steps=4096,
+        batch_size=512,
+        gae_lambda=0.92,
+        ent_coef=0.01,
+        clip_range=0.15,
+        max_grad_norm=0.5,
         verbose=0,
         device="cpu"
-    )
+    )   
+    # model = PPO("MlpPolicy", vec_env,verbose=0,device="cpu")
+
+    #model.learn(total_timesteps=250_000)
     model.learn(total_timesteps=10_000_000)
 
     # Save final model trained

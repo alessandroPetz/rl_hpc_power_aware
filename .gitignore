@@ -1,3 +1,4 @@
 datasets/*
 *.zip
-plots/*
+outputRL/plots/*
+outputRL_Co2only/plots/*
