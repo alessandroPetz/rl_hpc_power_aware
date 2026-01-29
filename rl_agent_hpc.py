@@ -16,6 +16,7 @@
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+
 import pandas as pd
 import numpy as np
 import gymnasium as gym
@@ -293,6 +294,7 @@ class HPCBatteryEnv(gym.Env):
         P_remaining = P_load - P_from_ren       # W
         E_needed = P_remaining * dt             # Wh
 
+
         E_curtail = 0.0
         
         #a=-1 if unconmmented = sim standard
@@ -301,14 +303,32 @@ class HPCBatteryEnv(gym.Env):
         # 2A. SE a < 0 → USA LA BATTERIA
         # ---------------------------------------------------------
         if a < 0:
-            E_from_batt = self.battery.discharge(-a * self.max_discharge_rate, dt)
+            # potenza massima utile per coprire il carico residuo
+            P_needed = E_needed / dt if dt > 0 else 0.0  # W
+
+            P_discharge = min(
+                -a * self.max_discharge_rate,  # W richiesti dall'azione
+                P_needed                       # W effettivamente utili
+            )
+
+            E_from_batt = self.battery.discharge(P_discharge, dt)
+            E_needed -= E_from_batt
+
+
+            E_from_batt = self.battery.discharge( min( -a*self.max_discharge_rate, E_needed) , dt)
             E_needed -= E_from_batt
 
         # ---------------------------------------------------------
         # 2B. SE a > 0 → CARICA DA RETE
         # ---------------------------------------------------------
         if a > 0:
-            E_charged_grid = self.battery.charge(a * self.max_charge_rate, dt)
+            # potenza richiesta dall'azione
+            P_charge_req = a * self.max_charge_rate  # W
+
+            # potenza effettivamente caricabile (limiti batteria)
+            E_charged_grid = self.battery.charge(P_charge_req, dt)
+
+            # tutta questa energia arriva dalla rete
             E_needed += E_charged_grid
 
 
@@ -316,9 +336,13 @@ class HPCBatteryEnv(gym.Env):
         # 3. ENERGIA FINALE DALLA RETE (Wh)
         # ---------------------------------------------------------
         P_grid = E_needed / dt if dt > 0 else 0
+        if P_grid < -1e-6:
+            print(f"[WARN] P_grid negativo: {P_grid:.2f} Wh | a={a:.2f} | batt={self.battery.energy:.0f}")
 
         E_base = min(P_grid, self.threshold) * dt
         E_peak = max(P_grid - self.threshold, 0) * dt
+
+        
 
         cost = E_base * price_base + E_peak * price_high
         
@@ -332,7 +356,10 @@ class HPCBatteryEnv(gym.Env):
         # --------------------------------------------------------
         reward = 0
         # reward = - cost - co2_g
-        reward = - 0.5* cost - co2_g
+
+        # print("cost = ", cost, ", co2 = " ,co2_g)
+
+        reward = - (0.1 * cost) - (0.1 * co2_g / 500)
 
         # Ridurre il picco energetico
         # reward -= 4.0 * (E_peak )
@@ -359,20 +386,10 @@ class HPCBatteryEnv(gym.Env):
         # shape reward
         if terminated:
             reward -= sum(self.cost_history)
-            reward -= sum(self.co2_history)
+            reward -= sum(self.co2_history) / 500
 
         return self._get_obs(), float(reward), terminated, False, {}
 
-
-
-def dynamic_low_price(timestamp):
-    hour = timestamp.hour
-    if 0 <= hour < 6:
-        return 0.0002
-    elif 6 <= hour < 22:
-        return 0.0012
-    else:
-        return 0.0005
 
 def pulizia_progetto(base_path="."):
     plots_trovata = False
@@ -422,13 +439,23 @@ def pulizia_progetto(base_path="."):
     if not plots_trovata:
         print("Nessuna cartella 'plots' trovata.")
 
+class StopAfterNEpisodes(BaseCallback):
+    def __init__(self, max_episodes, verbose=1):
+        super().__init__(verbose)
+        self.max_episodes = max_episodes
+        self.episode_count = 0
 
+    def _on_step(self) -> bool:
+        dones = self.locals.get("dones")
+        if dones is not None:
+            self.episode_count += int(sum(dones))
 
+            if self.episode_count >= self.max_episodes:
+                if self.verbose:
+                    print(f"Stopping training after {self.episode_count} episodes")
+                return False  # STOP TRAINING
 
-# Implementato:
-# forecasting meteo, forecasting c02 
-# dati meteo reali, co2 intensity reale,  
-
+        return True
 
 
 if __name__ == "__main__":
@@ -504,6 +531,9 @@ if __name__ == "__main__":
         max_charge_rate=3200000,      # Wh/h
         max_discharge_rate=3200000
     )
+
+    
+
     vec_env = DummyVecEnv([lambda: env])
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_reward=10.0)    # Option Reward = False
 
@@ -531,7 +561,12 @@ if __name__ == "__main__":
     # model = PPO("MlpPolicy", vec_env,verbose=0,device="cpu")
 
     #model.learn(total_timesteps=250_000)
-    model.learn(total_timesteps=10_000_000)
+    stop_callback = StopAfterNEpisodes(max_episodes=100)
+
+    model.learn(
+        total_timesteps=10_000_000,  # limite alto
+        callback=stop_callback
+    )
 
     # Save final model trained
     model.save(MODEL_PATH)
