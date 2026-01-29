@@ -29,6 +29,7 @@ import shutil
 from utils.renewable_real import RenewableModels
 from utils.co2 import CarbonIntensityModels
 from utils.battery_model import Battery
+from utils.price_model import PriceModel
 
 OUTPUT_DIR = "outputRL"
 MODEL_DIR = OUTPUT_DIR + "/models"
@@ -45,9 +46,7 @@ class HPCBatteryEnv(gym.Env):
         threshold=400000,
         battery_capacity=3200000,
         max_charge_rate=3200000,      # Wh/h
-        max_discharge_rate=3200000,
-        alpha=1.0,
-        beta=1.0
+        max_discharge_rate=3200000
         # fattore medio (gCO2 per kWh) — scegli il valore adatto (es. 270 gCO2/kWh per ITA come esempio)
         # CO2_G_PER_KWH_STATIC = 270.0
 
@@ -62,9 +61,6 @@ class HPCBatteryEnv(gym.Env):
         self.co2_history = []
         self.curtailment_history= []
         ## LOG ##
-
-        self.alpha = alpha
-        self.beta = beta
 
 
         self.df = df.reset_index(drop=True)
@@ -335,7 +331,8 @@ class HPCBatteryEnv(gym.Env):
         # 4. REWARD (stesso stile del tuo)
         # --------------------------------------------------------
         reward = 0
-        reward = - self.alpha * cost - self.beta * co2_g
+        # reward = - cost - co2_g
+        reward = - 0.5* cost - co2_g
 
         # Ridurre il picco energetico
         # reward -= 4.0 * (E_peak )
@@ -362,7 +359,7 @@ class HPCBatteryEnv(gym.Env):
         # shape reward
         if terminated:
             reward -= sum(self.cost_history)
-            # reward -= sum(self.co2_history)
+            reward -= sum(self.co2_history)
 
         return self._get_obs(), float(reward), terminated, False, {}
 
@@ -452,8 +449,8 @@ if __name__ == "__main__":
     df["dt_hours"] = df["dt_hours"].fillna(0)
     
     # INSERISCO PREZZI
-    df["price_base"] = df["time"].apply(dynamic_low_price)
-    df["price_high"] = df["price_base"] * 3
+    price_model = PriceModel()
+    df["price_base"], df["price_high"] = price_model.prices_from_df(df)
 
     # INSERISCO VALORI RINNOVABILI
     rm = RenewableModels(seed=42)
@@ -505,9 +502,7 @@ if __name__ == "__main__":
         threshold=400000,
         battery_capacity=3200000,
         max_charge_rate=3200000,      # Wh/h
-        max_discharge_rate=3200000,
-        alpha=0.2, 
-        beta=0.8
+        max_discharge_rate=3200000
     )
     vec_env = DummyVecEnv([lambda: env])
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_reward=10.0)    # Option Reward = False
