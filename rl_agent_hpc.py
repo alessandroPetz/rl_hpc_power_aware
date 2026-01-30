@@ -297,7 +297,7 @@ class HPCBatteryEnv(gym.Env):
 
         E_curtail = 0.0
         
-        #a=-1 if unconmmented = sim standard
+        # a=-1 #if unconmmented = sim standard
         
         # ---------------------------------------------------------
         # 2A. SE a < 0 → USA LA BATTERIA
@@ -358,8 +358,9 @@ class HPCBatteryEnv(gym.Env):
         # reward = - cost - co2_g
 
         # print("cost = ", cost, ", co2 = " ,co2_g)
-
-        reward = - (0.1 * cost) - (0.1 * co2_g / 500)
+        reward = - 0.01 * co2_g / 500
+        # reward = - (0.1 * cost) - (0.1 * co2_g / 500)
+        #reward = - (0.1 * cost) - (0.1 * co2_g)
 
         # Ridurre il picco energetico
         # reward -= 4.0 * (E_peak )
@@ -385,8 +386,8 @@ class HPCBatteryEnv(gym.Env):
 
         # shape reward
         if terminated:
-            reward -= sum(self.cost_history)
-            reward -= sum(self.co2_history) / 500
+            # reward -= sum(self.cost_history)
+            reward -= sum(self.co2_history/500) 
 
         return self._get_obs(), float(reward), terminated, False, {}
 
