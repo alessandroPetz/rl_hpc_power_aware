@@ -2,14 +2,27 @@
 
 # IN QUESTA SIMULAZIONE, LA BATTERIA DIVENTA UN ACCUMULATORE DI ENERGIA RINNOVABILE
 # AD OGNI STEP, SI CERCA DI COPRIRE LA RICHISTA DEL CLUSTER CON LE RINNOVABILI
-# SE AVANZA ENERGIA RINNOVABILE, SI CARICA LA BATTERIA
-# SE NON BASTA, SI USA LA BATTTERIA
+# SE AVANZA ENERGIA RINNOVABILE, SI CARICA LA BATTERIA * a_charge
+# SE NON BASTA, SI USA LA BATTTERIA * a_discharge
 # SE NON BASTA NEANCHE LA BATTERIA, SI USA LA RETE ELETTRICA (APPLICANDO COSTI E THRESHOLD COME IN PRECEDENZA) 
 
 # RL agent per cercare di migliorare rispetto alla regola base
 # qui si cerca di minimizzare sia il costo che il co2
 
+# dato che non si ricava tanto, provaiamo a puntare sullo soh della batteria. 
+# riusciamo a spendere e enettere uguale, ma mantenendo uno soh migliore?
+
 ####
+
+# differenze col v1
+
+# | Prima                  | Adesso                       |
+# | ---------------------- | ---------------------------- |
+# | carica sempre          | carica solo se conviene      |
+# | curtailment forzato    | curtailment decisionale      |
+# | batteria “gratis”      | batteria con costo implicito |
+# | azione spesso ignorata | azione sempre rilevante      |
+# | PPO confuso            | PPO stabile                  |
 
 
 
@@ -82,7 +95,7 @@ class HPCBatteryEnv(gym.Env):
         # -------------------------------
         self.observation_space = spaces.Box(
             low=np.array([0., 0., 0., 0., 0., 0., 0. ,0., 0., 0., 0., 0., 0., 0. ], dtype=np.float32),
-            high=np.array([3., 3., 1., 1., 1., 1., 1. ,1., 2., 4., 1., 1., 1., 1.], dtype=np.float32)
+            high=np.array([3., 3., 1., 1., 1., 1., 1. ,1., 1., 4., 1., 1., 1., 1.], dtype=np.float32)
         )
         # senza c02 forcasting
         # self.observation_space = spaces.Box(
@@ -98,11 +111,23 @@ class HPCBatteryEnv(gym.Env):
         
 
         # ACTION DISCRETA
+        # self.action_levels = np.array([
+        #     -1.0, -0.9, -0.8, -0.7, -0.6 -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 
+        #     0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0
+        #     ], dtype=np.float32)
+        # self.action_space = spaces.Discrete(len(self.action_levels))
+
+        # non carico la batteria da rete. a DECIDE  quanto BATTERIA UTILIZZARE, IN OGNI CASISTICA)
+        # provo a separare 
+        #   a_charge= quanto ricarico la batterie con rinovabili? nel caso ren > richiesta (forse conviene semmpre a=1????)
+        #   a_discharge, quanta batteria uso? nel caso ren non basti 
         self.action_levels = np.array([
-            -1.0, -0.9, -0.8, -0.7, -0.6 -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 
-            0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0
+            0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0
             ], dtype=np.float32)
-        self.action_space = spaces.Discrete(len(self.action_levels))
+        self.action_space = spaces.MultiDiscrete([
+            len(self.action_levels),   # a_charge
+            len(self.action_levels)    # a_discharge
+        ])
         
         # ACTION CONTINUA
         #self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
@@ -129,7 +154,7 @@ class HPCBatteryEnv(gym.Env):
         co2_int_norm = co2_int / (self.df["co2_intensity"].max() + 1e-9)
 
         time_left = 1.0 - (t / (self.N - 1))
-        prev_a = getattr(self, "prev_action", 0.0) +1   # in obs 0-2 solo positivi???
+        prev_a = getattr(self, "prev_action", 0.0)
 
         P_ren = float(self.df.loc[t, "P_ren"])
         P_ren_norm = P_ren / (self.threshold + 1e-9)   # può superare 1
@@ -181,8 +206,10 @@ class HPCBatteryEnv(gym.Env):
             csv_path = os.path.join(".", OUTPUT_DIR ,"results.csv")
 
             # Aggiunge la riga
+            end_SOC = self.battery.info()['SOC']
+            end_capacity =  self.battery.info["capacity_Wh"] / BATTERY_CAPACITY
             with open(csv_path, "a", encoding="utf-8") as f:
-                f.write(f"{self.episode_idx};{sum(self.cost_history):.4f};{sum(self.co2_history)/1000:.3f};{self.battery.info()['SOC']}\n")
+                f.write(f"{self.episode_idx};{sum(self.cost_history):.4f};{sum(self.co2_history)/1000:.3f};{end_SOC};{end_capacity},\n")
 
 
         self.episode_idx += 1
@@ -202,18 +229,20 @@ class HPCBatteryEnv(gym.Env):
         )
         return self._get_obs(), {}
 
-
     def step(self, action):
 
-        # --- ACTION ---
-        # a in [-1,1], a<0 scarica; a=0 neutro; a>0 carica da rete
-        # action DISCRETA
-        a = float(self.action_levels[action])
-        # action CONTINUA
-        # a = float(action[0])
+        # -------------------
+        # ACTION
+        # -------------------
+        idx_charge, idx_discharge = action
 
-        self.prev_action = a
+        a_charge = float(self.action_levels[idx_charge])
+        a_discharge = float(self.action_levels[idx_discharge])
 
+        # # a=1 # come simulazione..
+        # a_charge = 1     # carico sempre con tutto i lsurplus da rinnovabile
+        # a_discharge = 1  # uso sempre tutta la batteria utilizzabile.
+        
         t = self.t
         dt = float(self.df.loc[t, "dt_hours"])
         time = self.df.loc[t, "time"]
@@ -223,126 +252,80 @@ class HPCBatteryEnv(gym.Env):
 
         price_base = float(self.df.loc[t, "price_base"])
         price_high = float(self.df.loc[t, "price_high"])
-
         CO2_G_PER_KWH = float(self.df.loc[t, "co2_intensity"])
 
-        # se dt=0: no avanzamento fisico
-        if dt == 0:
+        # dt nullo → skip fisico
+        #non dovrebbe esistere
+        if dt <= 0:
             self.t += 1
-            terminated = self.t > self.N - 1
+            terminated = self.t >= self.N - 1
             return self._get_obs(), 0.0, terminated, False, {}
 
         # ---------------------------------------------------------
-        # 1. USA LA RINNOVABILE PER COPRIRE IL CARICO
+        # 1. RINNOVABILI → CARICO (SEMPRE)
         # ---------------------------------------------------------
         P_from_ren = min(P_load, P_ren)
         P_surplus  = max(P_ren - P_from_ren, 0.0)
 
-        # ---------------------------------------------------------
-        # 1A. SE C'È SURPLUS: CARICA LA BATTERIA con REN 
-        # carica anche dalla rete se a > 0
-        # ---------------------------------------------------------
-        if P_surplus > 0:
-            E_surplus = P_surplus * dt                     # Wh
-
-            E_charged = self.battery.charge(P_surplus, dt)
-            E_curtail = E_surplus - E_charged
-
-
-            # reward: gratis → positivo se usi rinnovabile
-            reward = 0
-            cost=0
-            co2_g=0
-
-
-            # logs
-            self.battery_history.append(self.battery.energy)
-            self.cost_history.append(cost)
-            self.co2_history.append(co2_g)
-            self.curtailment_history.append(E_curtail)
-            self.time_history.append(time)
-
-            self.t += 1
-            terminated = self.t > self.N - 1
-            return self._get_obs(), float(reward), terminated, False, {}
+        E_surplus = P_surplus * dt
+        E_deficit = (P_load - P_from_ren) * dt
 
         # ---------------------------------------------------------
-        # 2. NON C'È SURPLUS → RESTO DA COPRIRE
+        # 2. DECISIONE RL: CARICA DA RINNOVABILI
         # ---------------------------------------------------------
-        P_remaining = P_load - P_from_ren       # W
-        E_needed = P_remaining * dt             # Wh
-
-
+        E_to_batt = a_charge * E_surplus
+        # E_to_batt = E_surplus   # nel caso c'è suplus lo prendo sempre tutto... perchè non dovrebbe?
+        E_charged = 0.0
         E_curtail = 0.0
-        
-        # a=-1 #if unconmmented = sim standard
-        
-        # ---------------------------------------------------------
-        # 2A. SE a < 0 → USA LA BATTERIA
-        # ---------------------------------------------------------
-        if a < 0:
-            # potenza massima utile per coprire il carico residuo
-            P_needed = E_needed / dt if dt > 0 else 0.0  # W
 
-            P_discharge = min(
-                -a * self.max_discharge_rate,  # W richiesti dall'azione
-                P_needed                       # W effettivamente utili
+        #
+        if E_to_batt > 0:
+
+            #  E_surplus > 0 e a > 0 e E_deficit < 0
+            E_charged = self.battery.charge(E_to_batt / dt, dt)
+            E_curtail = E_surplus - E_charged
+        else:
+            # a = 0 o E_surplus <= 0
+            E_curtail = E_surplus
+
+        # ---------------------------------------------------------
+        # 3. DECISIONE RL: USA BATTERIA PER COPRIRE DEFICIT
+        # ---------------------------------------------------------
+        E_from_batt = 0.0
+        if E_deficit > 0 and a_discharge > 0:
+            # E_surplus <=0
+            E_from_batt = self.battery.discharge(
+                (a_discharge * E_deficit) / dt,
+                dt
             )
+            E_from_batt = min(E_from_batt, E_deficit)
 
-            E_from_batt = self.battery.discharge(P_discharge, dt)
-            E_needed -= E_from_batt
-
-        # ---------------------------------------------------------
-        # 2B. SE a > 0 → CARICA DA RETE
-        # ---------------------------------------------------------
-        if a > 0:
-            # potenza richiesta dall'azione
-            P_charge_req = a * self.max_charge_rate  # W
-
-            # potenza effettivamente caricabile (limiti batteria)
-            E_charged_grid = self.battery.charge(P_charge_req, dt)
-
-            # tutta questa energia arriva dalla rete
-            E_needed += E_charged_grid
-
+        E_grid = E_deficit - E_from_batt
 
         # ---------------------------------------------------------
-        # 3. ENERGIA FINALE DALLA RETE (Wh)
+        # 4. COSTI E CO2
         # ---------------------------------------------------------
-        P_grid = E_needed / dt if dt > 0 else 0
-        if P_grid < -1e-6:
-            print(f"[WARN] P_grid negativo: {P_grid:.2f} Wh | a={a:.2f} | batt={self.battery.energy:.0f}")
+        P_grid = E_grid / dt
 
         E_base = min(P_grid, self.threshold) * dt
         E_peak = max(P_grid - self.threshold, 0) * dt
 
-        
-
         cost = E_base * price_base + E_peak * price_high
-        
-
-        # CALCOLO co2
         co2_g = (E_base + E_peak) / 1000 * CO2_G_PER_KWH
 
-
         # ---------------------------------------------------------
-        # 4. REWARD (stesso stile del tuo)
-        # --------------------------------------------------------
-        reward = 0
-        # reward = - cost - co2_g
+        # 5. REWARD (semplice ma corretto)
+        # ---------------------------------------------------------
+        battery_throughput_kwh = self.battery.throughput_wh / 1000
 
-        # print("cost = ", cost, ", co2 = " ,co2_g)
-        reward = - 0.01 * co2_g / 500
-        # reward = - (0.1 * cost) - (0.1 * co2_g / 500)
-        #reward = - (0.1 * cost) - (0.1 * co2_g)
+        # print("cost = ", cost, " co2_g = ", co2_g, ", battery_throughput_kwh = ", battery_throughput_kwh)
 
-        # Ridurre il picco energetico
-        # reward -= 4.0 * (E_peak )
-        # Favorire arbitraggio prezzo (carica quando costa poco, scarica quando costa molto)
-        # if a > 0:
-        #     reward -= (price_base * E_charge)
-        # if a < 0:
-        #     reward += (price_high * E_discharge)
+        reward = (
+            - 0.1 * cost
+            - 0.1 / 500 * co2_g 
+            - 0.02 / 1000 * battery_throughput_kwh
+        )
+
 
         # ---------------------------------------------------------
         # LOGS
@@ -354,14 +337,14 @@ class HPCBatteryEnv(gym.Env):
         self.time_history.append(time)
 
         self.battery.step(dt)
-        self.t += 1
-        terminated = self.t > self.N - 1
 
+        self.t += 1
+        terminated = self.t >= self.N - 1
 
         # shape reward
         if terminated:
-            # reward -= sum(self.cost_history)
-            reward -= sum(self.co2_history/500) 
+            reward -= sum(self.cost_history)
+            reward -= sum(self.co2_history) /500
 
         return self._get_obs(), float(reward), terminated, False, {}
 
@@ -435,6 +418,20 @@ class StopAfterNEpisodes(BaseCallback):
 
 if __name__ == "__main__":
 
+    # THRESHOLD = 400000          # W
+    # BATTERY_CAPACITY = 3_200_000      # Wh
+    # P_MAX_RENS = (400000,450000)
+
+
+    # THRESHOLD = 300000          # W
+    # BATTERY_CAPACITY = 800_000      # Wh
+    # P_MAX_RENS = (200000,250000)
+
+    THRESHOLD = 500000          # W
+    BATTERY_CAPACITY = 6400000      # Wh
+    P_MAX_RENS = (400000,450000)
+
+
     # elimino vecchi plots
     # svuota resluts.csv
     pulizia_progetto(".")
@@ -460,8 +457,8 @@ if __name__ == "__main__":
     #df["P_solar"] = rm.solar_simple(df)
     #df["P_wind"] = rm.wind_stochastic(df)
     #df["P_wind"] = rm.wind_uniform(df)
-    df["P_wind"] = rm.wind_from_openmeteo(df)
-    df["P_solar"] = rm.solar_from_openmeteo(df)
+    df["P_wind"] = rm.wind_from_openmeteo(df, P_MAX_RENS[0])
+    df["P_solar"] = rm.solar_from_openmeteo(df, P_MAX_RENS[1])
     df["P_ren"]   = df["P_solar"] + df["P_wind"]
 
     # INSERISCO VALORI C02
@@ -501,10 +498,10 @@ if __name__ == "__main__":
 
     env= HPCBatteryEnv(
         df, 
-        threshold=400000,
-        battery_capacity=3200000,
-        max_charge_rate=3200000,      # Wh/h
-        max_discharge_rate=3200000
+        threshold=THRESHOLD,
+        battery_capacity=BATTERY_CAPACITY,
+        max_charge_rate=BATTERY_CAPACITY,      # Wh/h
+        max_discharge_rate=BATTERY_CAPACITY
     )
 
     

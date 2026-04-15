@@ -1,5 +1,5 @@
 class PriceModel:
-    def __init__(self, low_night=0.0005, day=0.0012, evening=0.0007, high_multiplier=3):
+    def __init__(self, low_night=0.00010, day=0.00025, evening=0.00018, high_multiplier=2):
         self.low_night = low_night
         self.day = day
         self.evening = evening

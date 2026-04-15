@@ -35,7 +35,9 @@ class Battery:
         soc_max=0.95,
         self_discharge_per_hour=0.001 / 24,
         #degradation_per_kwh=2e-5,
-        degradation_per_kwh = 5e-4
+        REAL_degradation_per_kwh = 5e-4,        # reale
+        SCALE_degradation_per_kwh = 50000,        # 10 gg ≈ 500 gg
+    
     ):
         self.capacity_nominal = capacity_wh
         self.capacity = capacity_wh
@@ -52,7 +54,7 @@ class Battery:
         self.soc_max = soc_max
 
         self.self_discharge_per_hour = self_discharge_per_hour
-        self.degradation_per_kwh = degradation_per_kwh
+        self.degradation_per_kwh = REAL_degradation_per_kwh*SCALE_degradation_per_kwh
 
         self.throughput_wh = 0.0
 
