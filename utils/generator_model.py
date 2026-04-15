@@ -12,6 +12,7 @@ class Generator:
         self.efficiency = efficiency
         self.fuel_cost_per_wh = fuel_cost_per_wh
         self.co2_g_per_Kwh = co2_g_per_kwh
+        self.ramp_rate = None
 
         self.current_power = 0
 

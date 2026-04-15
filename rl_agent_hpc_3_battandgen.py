@@ -62,6 +62,8 @@ class HPCBatteryEnv(gym.Env):
         ## LOG ##
         self.episode_idx = -1
         self.battery_history = []
+        self.battery_use_history = []
+        self.gen_use_history =[]
         self.time_history = []
         self.cost_history = []
         self.co2_history = []
@@ -192,14 +194,15 @@ class HPCBatteryEnv(gym.Env):
             end_SOC = self.battery.info()['SOC']
             end_capacity =  self.battery.info()["capacity_Wh"] / BATTERY_CAPACITY
             with open(csv_path, "a", encoding="utf-8") as f:
-                f.write(f"{self.episode_idx};{sum(self.cost_history):.4f};{sum(self.co2_history)/1000:.3f};{end_SOC};{end_capacity},\n")
+                f.write(f"{self.episode_idx};{sum(self.cost_history):.4f};{sum(self.co2_history)/1000:.3f};{end_SOC};{end_capacity};{sum(self.battery_use_history):.3f};{sum(self.gen_use_history):.3f},\n")
 
         self.episode_idx += 1
         self.battery_history = [self.capacity / 2]
         self.time_history =  [self.df.loc[0, "time"]]
         self.cost_history = [0]
         self.co2_history = [0]
-        #self.gen_history = [0]
+        self.gen_use_history = [0]
+        self.battery_use_history = [0]
         self.curtailment_history= [0]
         ## END PLOT LOG ##
 
@@ -214,7 +217,7 @@ class HPCBatteryEnv(gym.Env):
                 max_power_w=500000,
                 min_power_w=50000,
                 efficiency=0.4,
-                fuel_cost_per_kwh=0.25,
+                fuel_cost_per_wh=0.00025,
                 co2_g_per_kwh=450
             )
         return self._get_obs(), {}
@@ -229,6 +232,13 @@ class HPCBatteryEnv(gym.Env):
 
         a_discharge = float(self.action_levels[idx_discharge])  # quanta batteria usare
         a_gen = float(self.action_levels[idx_gen])              # quanto generatore usare
+
+        #a_discharge = 1
+        # if  float(self.df.loc[t, "price_high"]) > self.generator.fuel_cost_per_wh:
+        #     a_gen = 1
+        # else:
+        #     a_gen= 0
+
 
         t = self.t
         dt = float(self.df.loc[t, "dt_hours"])
@@ -319,7 +329,7 @@ class HPCBatteryEnv(gym.Env):
         # 8. CO2
         # =========================
         co2_grid = (E_base + E_peak) / 1000 * co2_intensity
-        co2_gen = self.generator.get_co2(E_from_gen)
+        co2_gen = self.generator.get_co2(E_from_gen / 1000)
 
         co2 = co2_grid + co2_gen
 
@@ -332,7 +342,7 @@ class HPCBatteryEnv(gym.Env):
         # 10. REWARD (STABLE)
         # =========================
         reward = (
-            #- 0.01 * cost
+            - 0.01 * cost
             - 0.01 * co2
             #- 0.001 * battery_stress
             #- 0.005 * E_curtail
@@ -344,14 +354,21 @@ class HPCBatteryEnv(gym.Env):
         if self.t == self.N - 1:
             #final_soc = self.battery.energy / self.battery.capacity
             #reward -= 0.5 * abs(0.5 - final_soc)  # prefer SOC medio
-            reward = sum(self.co2_history)
+            reward = (
+            
+                - sum(self.co2_history)
+                - sum(self.cost)
+
+            )
 
         # =========================
         # 12. APPLY STATE UPDATES
         # =========================
         self.battery_history.append(self.battery.energy)
+        self.gen_use_history.append(E_from_gen)
+        self.battery_use_history.append(E_from_batt)
         self.cost_history.append(cost)
-        self.co2_history.append(co2)
+        self.co2_history.append(co2)     
         self.curtailment_history.append(E_curtail)
         self.time_history.append(self.df.loc[t, "time"])
 
@@ -395,7 +412,7 @@ def pulizia_progetto(base_path="."):
             print(f"Trovato file: {path_results}")
 
     # --- Scrittura o creazione results.csv ---
-    intestazioni = "episodio;total_cost;total_co2;SOC_finale\n"
+    intestazioni = "episodio;total_cost;total_co2;SOC_finale;battery_use_history;gen_use_history\n"
 
     if results_trovato:
         with open(path_results, "w", encoding="utf-8") as f:
@@ -441,8 +458,8 @@ if __name__ == "__main__":
     # BATTERY_CAPACITY = 800_000      # Wh
     # P_MAX_RENS = (200000,250000)
 
-    THRESHOLD = 500000          # W
-    BATTERY_CAPACITY = 6400000      # Wh
+    THRESHOLD = 200000          # W
+    BATTERY_CAPACITY = 3200000      # Wh
     P_MAX_RENS = (400000,450000)
 
 
