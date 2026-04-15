@@ -233,7 +233,7 @@ class HPCBatteryEnv(gym.Env):
         a_discharge = float(self.action_levels[idx_discharge])  # quanta batteria usare
         a_gen = float(self.action_levels[idx_gen])              # quanto generatore usare
 
-        #a_discharge = 1
+        # a_discharge = 1
         # if  float(self.df.loc[t, "price_high"]) > self.generator.fuel_cost_per_wh:
         #     a_gen = 1
         # else:
@@ -564,7 +564,7 @@ if __name__ == "__main__":
     # model = PPO("MlpPolicy", vec_env,verbose=0,device="cpu")
 
     #model.learn(total_timesteps=250_000)
-    stop_callback = StopAfterNEpisodes(max_episodes=100)
+    stop_callback = StopAfterNEpisodes(max_episodes=200)
 
     model.learn(
         total_timesteps=10_000_000,  # limite alto
