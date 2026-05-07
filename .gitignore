@@ -2,7 +2,7 @@ datasets/*
 *.zip
 outputRL/plots/*
 outputRL_Co2only/plots/*
-modelzoo_intergration_test/
-modelzoo_intergration_test/*
+modelzoo_integration_test/
+modelzoo_integration_test/*
 *.parquet
 *.mat
