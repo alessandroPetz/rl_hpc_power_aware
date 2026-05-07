@@ -188,7 +188,7 @@ class HPCBatteryEnv(gym.Env):
             plt.savefig(filename)
             plt.close()
 
-            csv_path = os.path.join(".", OUTPUT_DIR, "results.csv")
+            csv_path = os.path.join(".", OUTPUT_DIR, "results_sim2.csv")
 
             end_soc = self.battery.info()["SOC"]
             end_capacity_ratio = self.battery.info()["capacity_Wh"] / self.capacity
@@ -340,7 +340,7 @@ class HPCBatteryEnv(gym.Env):
         reward = (
             - 0.1 * cost
             - 0.1 / 500.0 * co2_g
-            - 0.02 / 1000.0 * battery_throughput_kwh
+            #- 0.02 / 1000.0 * battery_throughput_kwh
         )
 
         # ---------------------------------------------------------
@@ -397,9 +397,9 @@ def pulizia_progetto(base_path="."):
 
             print("Cartella 'plots' svuotata.")
 
-        if "results.csv" in files and not results_trovato:
+        if "results_sim2.csv" in files and not results_trovato:
             results_trovato = True
-            path_results = os.path.join(root, "results.csv")
+            path_results = os.path.join(root, "results_sim2.csv")
             print(f"Trovato file: {path_results}")
 
     intestazioni = "episodio;total_cost;total_co2;SOC_finale;capacity_ratio\n"
@@ -407,9 +407,9 @@ def pulizia_progetto(base_path="."):
     if results_trovato:
         with open(path_results, "w", encoding="utf-8") as f:
             f.write(intestazioni)
-        print(f"File {OUTPUT_DIR}/results.csv svuotato e intestazioni riscritte.")
+        print(f"File {OUTPUT_DIR}/results_sim2.csv svuotato e intestazioni riscritte.")
     else:
-        path_results = os.path.join(base_path, OUTPUT_DIR, "results.csv")
+        path_results = os.path.join(base_path, OUTPUT_DIR, "results_sim2.csv")
         os.makedirs(os.path.dirname(path_results), exist_ok=True)
         with open(path_results, "w", encoding="utf-8") as f:
             f.write(intestazioni)
@@ -440,17 +440,17 @@ class StopAfterNEpisodes(BaseCallback):
 
 if __name__ == "__main__":
 
-    THRESHOLD = 500000
-    BATTERY_CAPACITY = 6400000
+    THRESHOLD = 400000
+    BATTERY_CAPACITY = 3200000
     P_MAX_RENS = (400000, 450000)
 
     pulizia_progetto(".")
-    print("Start to training.... results in results.csv")
+    print("Start to training.... results in results_sim2.csv")
 
     # -------------------------------------------------------
     # RUN TRAINING
     # -------------------------------------------------------
-    df = pd.read_csv("csvs/cluster_power_only_nodes_10days.csv")
+    df = pd.read_csv("csvs/cluster_power_only_nodes_30days.csv")
     # df = pd.read_csv("cluster_power_only_nodes.csv")
 
     df["time"] = pd.to_datetime(df["time"], utc=True)
