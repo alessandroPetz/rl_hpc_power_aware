@@ -1,1 +1,8 @@
-power aware in hpc with RL
+Trace-Driven Energy Dispatch for HPC Clusters:
+Cost-Carbon Trade-offs under Grid Power
+Constraints
+
+all the simulationa are in rule_based_sims.ipynb
+
+for all the info contact: 
+alessandro.petrella@unibo.it
