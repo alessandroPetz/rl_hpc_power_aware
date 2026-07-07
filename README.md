@@ -17,4 +17,4 @@ This repository contains the simulation code and experimental material for the P
 
 ## Setup
 
-Create and activate a Conda environment, then install the required dependencies using requirements.txt
+Create and activate a Conda environment, using requirements.txt
