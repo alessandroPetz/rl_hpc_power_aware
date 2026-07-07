@@ -1,16 +1,25 @@
 ####
-# RL - versione senza hard constraint
-# Obiettivo:
-# usare batteria + generatore + green per minimizzare costo e CO2
-# mantenendo la logica attuale di training e stop
+# RL optimization of the "All" simulation scenario
+# (grid + battery + generator + renewable generation)
 #
-# Aggiornamenti:
-# - aggiunti costi / CO2 di green e batteria
-# - mantenuta logica:
-#     renewable -> battery -> generator -> grid
-# - niente hard constraint sulla threshold
-# - reward ancora basata su costo + CO2
+# Objective:
+# use renewable generation, battery storage, backup generation, and grid
+# import to minimize the combined cost and CO2 impact of the dispatch.
+#
+# Physical logic of the environment:
+# 1) renewable generation is used first to cover the load
+# 2) any renewable surplus is used to charge the battery
+# 3) if renewables are not sufficient, the agent decides how much battery
+#    energy to discharge
+# 4) the agent also decides how much backup generation to use
+# 5) any remaining demand is supplied by the grid
+# 6) grid energy is split into base and peak components according to the
+#    configured threshold
+# 7) the total objective includes grid, renewable, battery, and generator
+#    cost and CO2 contributions
 ####
+
+
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
